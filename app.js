@@ -1336,7 +1336,7 @@
     el.innerHTML = head + `
       ${window.__PWA__ ? '<p class="small" style="margin-top:0"><span class="tag good">✓ You’re using the installed app</span></p>' : ''}
       <ol class="small" style="padding-left:20px;margin:0 0 10px;display:grid;gap:4px">
-        <li>On the iPhone, open <a href="${esc(url)}" target="_blank" rel="noopener">${esc(url.replace(/^https:\/\//, ''))}</a> in <strong>Safari</strong>.</li>
+        <li>On the iPhone, open <a href="${esc(url)}" target="_blank" rel="noopener">${esc(url.replace(/^https:[/][/]/, ''))}</a> in <strong>Safari</strong>.</li>
         <li>Tap <strong>Share</strong> ⬆︎ ▸ <strong>Add to Home Screen</strong> ▸ <strong>Add</strong>.</li>
         <li>Open <strong>ZR &amp; YC</strong> from the Home Screen. Press <strong>Get pairing code</strong> below and type the code into the app.</li>
       </ol>
