@@ -167,6 +167,11 @@
   const aIcon = name => (ACCOUNT_STYLE[name] || ['🏦'])[0];
   const aColour = name => (ACCOUNT_STYLE[name] || [])[1] || ACCOUNT_COLOURS[Math.max(0, state.M.accounts.indexOf(name)) % ACCOUNT_COLOURS.length];
   const fundsIn = account => state.M.fundNames.filter(f => fundOf(f).account === account);
+  /** Accounts that earn interest: all except the everyday spending account. */
+  const interestAccounts = () => {
+    const everyday = (fundOf('Living Expenses') || {}).account;
+    return state.M.accounts.filter(a => a !== everyday);
+  };
   const fyName = fy => E.fyName(fy);
   const sameFy = (a, b) => E.normFy(a) === E.normFy(b);
   const fundLabel = name => `<span class="row" style="gap:6px;flex-wrap:nowrap"><span class="dot" style="--c:${fColour(name)}"></span>${esc(name)}</span>`;
@@ -484,7 +489,7 @@
     const lastDay = E.addDays(thisMonth + '-01', -1);
     return `<section class="card" style="border:2px solid var(--brand-deep)"><div class="row" style="flex-wrap:nowrap;align-items:flex-start">${tile('🏦', 'var(--brand-deep)')}
       <div style="flex:1;min-width:0"><strong>Record ${monthLong(prev)}’s bank interest</strong>
-        <div class="muted small">Check the Everyday Account, Self Saving and Shared Saving in your bank apps.</div>
+        <div class="muted small">Check ${interestAccounts().map(esc).join(' and ')} in your bank apps.</div>
         <div class="row" style="margin-top:8px"><button class="btn primary" data-act="interest-record" data-date="${lastDay}">🏦 Record interest</button>
           <button class="btn link" data-act="interest-skip" data-key="${prev}">None this month</button></div></div></div></section>`;
   }
@@ -610,7 +615,7 @@
 
     const log = activity({ income: true }).filter(it => (M.income.find(r => r.id === it.id) || {}).fy === fy);
     return `
-      <div class="section-title"><h1>Income</h1><div class="row">${fySelect(fy, 'fy')}${addBtn('income', 'Add pay')}</div></div>
+      <div class="section-title"><h1>Income</h1><div class="row">${fySelect(fy, 'fy')}${addBtn('income', 'Pay')}<button class="btn" data-act="add-other">💰 Other</button></div></div>
       <div class="stats">${stat('Net income', money(T.net), T.count + ' pays')}${stat('Gross', money(T.gross), hrs(T.hours))}${stat('Tax withheld', money(T.tax))}${stat('Super (employer)', money(T.superAmt), 'not in net')}</div>
       <section class="card"><div class="card-head"><h2>Week by week</h2><span class="hint">${fyName(fy)}</span></div>
         ${weeks.length ? table(head, body, foot) : empty('💼', `No pay entered for ${fyName(fy)} yet.`, addBtn('income', 'Add pay'))}
@@ -739,7 +744,7 @@
     const funds = M.fundNames;
     const ok = A && Math.abs(A.total - 1) <= 0.00005;
 
-    const allocCard = `<section class="card"><div class="card-head"><h2>How each pay is split</h2><span class="hint">${A ? 'from ' + fmtDate(A.from) : ''}</span></div>
+    const allocCard = `<section class="card hide-phone"><div class="card-head"><h2>How each pay is split</h2><span class="hint">${A ? 'from ' + fmtDate(A.from) : ''}</span></div>
       ${A ? stackBar(funds.map(f => ({ label: f, value: A.pct[f], colour: fColour(f) }))) : ''}
       <div style="margin-top:10px">${funds.map(f => `<div class="insight">${tile(fIcon(f), fColour(f), 'sm')}
         <div style="flex:1;min-width:0"><strong>${esc(f)}</strong><div class="muted small">${esc(fundOf(f).account)}</div></div>
@@ -1045,7 +1050,7 @@
     years = years.sort().reverse();
     const fyTotal = sumOf(inFy, share);
     const allTotal = sumOf(mine, share);
-    const accts = M.accounts;
+    const accts = interestAccounts();
     const months = E.fyMonths(fy).filter(m => m <= E.monthOf(M.today) || inFy.some(r => r.month === m));
     const cell = (m, a) => sumOf(inFy.filter(r => r.month === m && r.account === a), share);
 
@@ -1307,7 +1312,7 @@
         ${grid('g-cats', [{ key: 'icon', label: 'Icon' }, { key: 'name', label: 'Category' }, { key: 'fund', label: 'Paid from fund', type: 'select', options: M.fundNames }], catRows, 'Add category')}
         ${saveBar('save-cats', 'Save categories')}</section>
 
-      <section class="card" id="tax-tables"></section>
+      <section class="card hide-phone" id="tax-tables"></section>
 
       <section class="card"><div class="card-head"><h2>🗂️ Data</h2></div>
         <div class="row">
@@ -1614,11 +1619,17 @@
       return { date, from: code, to: M.codes.find(c => c !== code) || code, amount: '', note: '' };
     }
     if (kind === 'interest') {
-      const acct = M.accounts.indexOf('Self Saving') >= 0 ? 'Self Saving' : M.accounts[0];
+      const acct = interestAccounts().indexOf('Self Saving') >= 0 ? 'Self Saving' : interestAccounts()[0] || M.accounts[0];
       return { date, person: code, fund: fundsIn(acct)[0] || M.fundNames[0], amount: '', note: '' };
     }
     return { date, person: code, fromFund: M.fundNames[0], toFund: M.fundNames[1] || '', amount: '', note: '' };
   }
+
+  /** A new entry ID made here, so the app can show the entry before the server has saved it. */
+  const newId = kind => kind.charAt(0).toUpperCase() + '-' + Array.from({ length: 12 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+
+  /** Typing the minus sign the keypad uses (−), so "-5" can be edited as "−5". */
+  const exprOf = v => (blank(v) ? '' : String(v).replace('-', '−'));
 
   function openForm(kind, rec, opts) {
     const isNew = !rec;
@@ -1632,8 +1643,24 @@
       rec.fromAccount = fa || state.M.accounts[0];
       rec.toAccount = ta || state.M.accounts[1] || state.M.accounts[0];
     }
-    if (kind === 'interest') rec.account = (fundOf(rec.fund) || {}).account || state.M.accounts[0];
-    state.form = { kind, rec, isNew: opts && opts.isNew !== undefined ? opts.isNew : isNew, adjType: (opts && opts.adjType) || adjType };
+    if (kind === 'interest') rec.account = (fundOf(rec.fund) || {}).account || interestAccounts()[0];
+    // Income is either wages (days × hours) or other income (an amount).
+    let payType = null;
+    if (kind === 'income') {
+      payType = (opts && opts.payType) || (!(Number(rec.days) || Number(rec.extraHours)) && !blank(rec.otherNet) && Number(rec.otherNet) !== 0 ? 'other' : 'wages');
+      if (payType === 'other') rec.amount = blank(rec.otherNet) ? '' : rec.otherNet;
+    }
+    const myrSaved = rec.currency === 'MYR';
+    state.form = {
+      kind, rec, payType,
+      isNew: opts && opts.isNew !== undefined ? opts.isNew : isNew,
+      adjType: (opts && opts.adjType) || adjType,
+      calc: {
+        cur: myrSaved ? 'MYR' : 'AUD',
+        rate: myrSaved && rec.fxRate ? rec.fxRate : state.M.general.exchangeRate,
+        expr: myrSaved ? exprOf(rec.fxAmount) : exprOf(rec.amount),
+      },
+    };
     renderForm();
     $('#modal').hidden = false;
     document.body.style.overflow = 'hidden';
@@ -1661,15 +1688,159 @@
     `<div class="field"><span>${label}</span><div class="stepper"><button type="button" data-act="form-step" data-key="${name}" data-step="-${step}" aria-label="Less">−</button>
       <input name="${name}" value="${esc(value)}" type="number" inputmode="decimal" step="${step}" ${attrs || ''}><button type="button" data-act="form-step" data-key="${name}" data-step="${step}" aria-label="More">+</button></div></div>`;
 
+  /** Any fund, grouped by bank account, with a first "default" choice. */
+  const fundSelect = (name, value, defaultLabel) => `<select name="${name}"><option value="">${esc(defaultLabel)}</option>${state.M.accounts.map(a =>
+    `<optgroup label="${esc(aIcon(a))} ${esc(a)}">${fundsIn(a).map(f => `<option value="${esc(f)}"${f === value ? ' selected' : ''}>${esc(fIcon(f))} ${esc(f)}</option>`).join('')}</optgroup>`).join('')}</select>`;
+
+  // ---------- calculator keypad ----------
+
+  const CALC_OPS = '+−×÷';
+
+  /** Works out "12.5+8×2" (× and ÷ before + and −). Returns NaN for things like ÷ 0. */
+  function calcValue(expr) {
+    const tokens = [];
+    let num = '';
+    String(expr || '').split('').forEach(ch => {
+      if ('0123456789.'.indexOf(ch) >= 0) num += ch;
+      else if (CALC_OPS.indexOf(ch) >= 0) {
+        if (num) tokens.push(num);
+        num = '';
+        tokens.push(ch);
+      }
+    });
+    if (num) tokens.push(num);
+    while (tokens.length && CALC_OPS.indexOf(tokens[tokens.length - 1]) >= 0) tokens.pop();
+    const nums = [];
+    const ops = [];
+    let sign = 1;
+    let wantNum = true;
+    tokens.forEach(t => {
+      if (CALC_OPS.indexOf(t) >= 0) {
+        if (wantNum) { if (t === '−') sign = -sign; return; }
+        ops.push(t);
+        wantNum = true;
+      } else {
+        nums.push(sign * parseFloat(t));
+        sign = 1;
+        wantNum = false;
+      }
+    });
+    if (!nums.length) return 0;
+    const terms = [nums[0]];
+    const adds = [];
+    ops.forEach((op, i) => {
+      const b = nums[i + 1];
+      if (b === undefined) return;
+      if (op === '×') terms[terms.length - 1] *= b;
+      else if (op === '÷') terms[terms.length - 1] = b === 0 ? NaN : terms[terms.length - 1] / b;
+      else { adds.push(op); terms.push(b); }
+    });
+    let v = terms[0];
+    adds.forEach((op, i) => { v = op === '+' ? v + terms[i + 1] : v - terms[i + 1]; });
+    return isFinite(v) ? Math.round(v * 100) / 100 : NaN;
+  }
+
+  /** Calculator keypad for amounts. With `withCurrency`, the amount can be typed in MYR at an editable rate. */
+  function keypad(withCurrency) {
+    const F = state.form;
+    const c = F.calc;
+    F.calcCurrency = !!withCurrency;
+    const myrMode = withCurrency && c.cur === 'MYR';
+    const keys = ['7', '8', '9', '÷', '4', '5', '6', '×', '1', '2', '3', '−', '.', '0', '⌫', '+'];
+    return `<div class="calc">
+      <input type="hidden" name="amount" value="${esc(F.rec.amount)}">
+      ${withCurrency ? '<input type="hidden" name="currency" value=""><input type="hidden" name="fxAmount" value=""><input type="hidden" name="fxRate" value="">' : ''}
+      <div class="calc-screen">
+        <div class="spread">${withCurrency ? `<div class="mini-tabs" role="group" aria-label="Currency">${['AUD', 'MYR'].map(k =>
+          `<button type="button" data-act="calc-cur" data-key="${k}" aria-pressed="${c.cur === k}">${k}</button>`).join('')}</div>` : '<span class="muted small">AUD</span>'}
+          <span class="calc-expr" id="calc-expr">&nbsp;</span></div>
+        <div class="calc-value" id="calc-value" aria-live="polite"></div>
+        ${myrMode ? `<div class="calc-rate"><span>= <strong id="calc-aud"></strong></span>
+          <label>1 AUD = <input id="calc-rate" type="number" inputmode="decimal" step="0.0001" min="0" value="${esc(c.rate)}" aria-label="MYR per AUD"> MYR</label></div>` : ''}
+      </div>
+      <div class="calc-keys">${keys.map(k => `<button type="button" data-act="calc" data-key="${k}"${'0123456789.'.indexOf(k) >= 0 ? '' : ' class="op"'} aria-label="${k === '⌫' ? 'Delete' : k}">${k}</button>`).join('')}
+        <button type="button" data-act="calc" data-key="C" class="op wide" aria-label="Clear">C</button><button type="button" data-act="calc" data-key="=" class="eq wide">=</button></div>
+    </div>`;
+  }
+
+  /** After a key: update the hidden fields, the display and the preview (without redrawing the form). */
+  function calcSync() {
+    const F = state.form;
+    const c = F.calc;
+    const v = calcValue(c.expr);
+    const myrMode = F.calcCurrency && c.cur === 'MYR';
+    const rate = Number(c.rate) || state.M.general.exchangeRate || 1;
+    const aud = isFinite(v) ? (myrMode ? E.round2(v / rate) : v) : NaN;
+    F.rec.amount = c.expr === '' || !isFinite(aud) ? '' : aud;
+    if (F.calcCurrency) {
+      F.rec.currency = myrMode ? 'MYR' : '';
+      F.rec.fxAmount = myrMode && isFinite(v) ? v : '';
+      F.rec.fxRate = myrMode ? rate : '';
+    }
+    ['amount', 'currency', 'fxAmount', 'fxRate'].forEach(name => {
+      const el = $('#entry-form [name="' + name + '"]');
+      if (el) el.value = blank(F.rec[name]) ? '' : F.rec[name];
+    });
+    const ex = $('#calc-expr');
+    if (ex) ex.textContent = /[+−×÷]/.test(c.expr.replace(/^−/, '')) ? c.expr : ' ';
+    const val = $('#calc-value');
+    if (val) {
+      val.textContent = !isFinite(v) ? 'Can’t divide by 0' : myrMode ? myr(v) : money(v);
+      val.classList.toggle('neg', !isFinite(v) || v < 0);
+    }
+    const audEl = $('#calc-aud');
+    if (audEl) audEl.textContent = isFinite(aud) ? money(aud) : '—';
+    updatePreview();
+  }
+
+  function calcKey(k) {
+    const c = state.form.calc;
+    let e = c.expr;
+    const last = e.split(/[+−×÷]/).pop();
+    if (k === 'C') e = '';
+    else if (k === '⌫') e = e.slice(0, -1);
+    else if (k === '=') {
+      const v = calcValue(e);
+      if (e && isFinite(v)) e = exprOf(v);
+    } else if (CALC_OPS.indexOf(k) >= 0) {
+      if (!e) { if (k === '−') e = '−'; }
+      else if (CALC_OPS.indexOf(e.slice(-1)) >= 0) e = e.length > 1 ? e.slice(0, -1) + k : (k === '−' ? '−' : '');
+      else e += k;
+    } else if (k === '.') {
+      if (last.indexOf('.') < 0) e += last === '' ? '0.' : '.';
+    } else {
+      if (/\.\d\d$/.test(last)) return; // two decimals at most
+      e = last === '0' ? e.slice(0, -1) + k : e + k;
+    }
+    if (e.length > 40) return;
+    c.expr = e;
+    calcSync();
+  }
+
   function renderForm() {
     const M = state.M;
     const F = state.form;
     const r = F.rec;
     const people = M.codes.map(c => [c, pName(c)]);
     let body = '';
+    F.calcCurrency = false;
     if (F.kind === 'income') {
       const p = personOf(r.person) || {};
-      body = `
+      const typeSeg = F.isNew ? `<div class="seg" role="group" aria-label="Income type">${[['wages', '💼 Wages'], ['other', '💰 Other income']].map(([k, l]) =>
+        `<button type="button" data-act="form-paytype" data-key="${k}" aria-pressed="${F.payType === k}">${l}</button>`).join('')}</div>` : '';
+      if (F.payType === 'other') {
+        const taxable = r.otherTaxable === 'Yes' ? 'Yes' : '';
+        body = typeSeg + `
+        ${keypad(true)}
+        <div class="field"><span>Who received it?</span>${who(r.person, people)}</div>
+        <label class="field"><span>Put it into</span>${fundSelect('intoFund', r.intoFund, 'Split like pay (budget %)')}</label>
+        <div class="field"><span>Counts as taxable income?</span><input type="hidden" name="otherTaxable" value="${taxable}">
+          <div class="who" role="group">${[['', 'No · gift, refund, cashback'], ['Yes', 'Yes · side job, cash work']].map(([v, l]) =>
+            `<button type="button" data-act="form-taxable" data-key="${v}" aria-pressed="${taxable === v}" style="padding-left:14px">${l}</button>`).join('')}</div></div>
+        <div class="two">${field('Date received', 'date', r.date, 'type="date" required')}
+          ${field('What is it?', 'note', r.note, 'type="text" placeholder="e.g. tax refund, gift"')}</div>`;
+      } else {
+        body = typeSeg + `
         <div class="field"><span>Who was paid?</span>${who(r.person, people)}</div>
         <div class="two">${field('Pay date', 'date', r.date, 'type="date" required')}
           ${field('Hourly rate ($)', 'rate', r.rate, 'type="number" step="0.01" min="0" inputmode="decimal"')}</div>
@@ -1678,35 +1849,37 @@
           ${stepper('Hours / day', 'hoursPerDay', r.hoursPerDay, 0.5, 'min="0"')}
           ${stepper('Extra hours', 'extraHours', r.extraHours, 0.5, 'placeholder="0"')}</div>
         ${field('Payslip tax (optional)', 'actualTax', r.actualTax, 'type="number" step="0.01" min="0" inputmode="decimal" placeholder="Blank = calculated for you"')}
-        <details class="opt"${!blank(r.scale) || r.note || !blank(r.otherNet) ? ' open' : ''}><summary>More options</summary>
+        <details class="opt"${!blank(r.scale) || r.note ? ' open' : ''}><summary>More options</summary>
           <div class="two" style="margin-top:8px">
             <label class="field"><span>Tax scale</span><select name="scale">${SCALES.map(s => `<option value="${s === 'Auto' ? '' : s}"${String(r.scale || '') === (s === 'Auto' ? '' : s) ? ' selected' : ''}>${s === 'Auto' ? 'Auto (' + esc(SCALE_NAMES[E.scaleFor(p)] || E.scaleFor(p)) + ')' : esc(SCALE_NAMES[s])}</option>`).join('')}</select></label>
-            ${field('Note', 'note', r.note, 'type="text"')}</div>
-          ${field('Tax refund / other income (not taxed)', 'otherNet', r.otherNet, 'type="number" step="0.01" inputmode="decimal" placeholder="0.00"')}</details>`;
+            ${field('Note', 'note', r.note, 'type="text"')}</div></details>`;
+      }
     } else if (F.kind === 'expenses') {
       const split = blank(r.splitPct) ? Math.round(M.general.sharedSplit * 100) : r.splitPct;
+      const catFund = (M.categories.find(c => c.name === r.category) || {}).fund || '';
       body = `
-        <div class="amount-box"><span class="cur">$</span><input name="amount" value="${esc(r.amount)}" type="number" step="0.01" inputmode="decimal" placeholder="0.00" aria-label="Amount in AUD" required></div>
+        ${keypad(true)}
         <div class="field"><span>Whose expense?</span>${who(r.person, people.concat([['Shared', 'Shared']]))}</div>
         <div class="field"><span>Who paid?</span><input type="hidden" name="paidBy" value="${esc(r.paidBy || '')}">${who(r.paidBy, people, 'form-paidby')}</div>
         ${r.person === 'Shared' ? `<div class="field"><span>Split: ${esc(pName(M.codes[0]))} <output id="split-out">${split}</output>% · ${esc(pName(M.codes[1]))} <output id="split-out2">${100 - split}</output>%</span>
           <input name="splitPct" type="range" min="0" max="100" step="5" value="${esc(split)}" aria-label="${esc(pName(M.codes[0]))}'s share"></div>` : ''}
         <div class="field"><span>Category</span><input type="hidden" name="category" value="${esc(r.category)}">
           <div class="cat-grid">${M.categories.map(c => `<button type="button" class="cat-chip" data-act="form-cat" data-key="${esc(c.name)}" aria-pressed="${c.name === r.category}" style="--c:${fColour(c.fund)}" title="${esc(c.fund)}"><span class="e">${esc(cIcon(c.name))}</span>${esc(c.name)}</button>`).join('')}</div></div>
+        <label class="field"><span>Comes out of</span>${fundSelect('fund', r.fund, `Category’s fund: ${fIcon(catFund)} ${catFund} (${(fundOf(catFund) || {}).account || ''})`)}</label>
         <div class="two">${field('Date', 'date', r.date, 'type="date" required')}
           ${field('Description', 'description', r.description, 'type="text" placeholder="Optional"')}</div>`;
     } else if (F.kind === 'paybacks') {
       body = `
         <div class="field"><span>Who gave the money?</span><input type="hidden" name="from" value="${esc(r.from)}"><input type="hidden" name="to" value="${esc(r.to)}">
           ${who(r.from, people, 'form-from')}<span class="muted small">to <strong>${esc(pName(r.to))}</strong></span></div>
-        <div class="amount-box"><span class="cur">$</span><input name="amount" value="${esc(r.amount)}" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0.00" aria-label="Amount in AUD" required></div>
+        ${keypad(false)}
         <div class="two">${field('Date', 'date', r.date, 'type="date" required')}
           ${field('Note', 'note', r.note, 'type="text" placeholder="e.g. paid back, cash loan"')}</div>`;
     } else if (F.kind === 'interest') {
-      const acctOpts = `<select name="account">${M.accounts.map(a => `<option value="${esc(a)}"${a === r.account ? ' selected' : ''}>${esc(aIcon(a))} ${esc(a)}</option>`).join('')}</select>`;
+      const acctOpts = `<select name="account">${interestAccounts().map(a => `<option value="${esc(a)}"${a === r.account ? ' selected' : ''}>${esc(aIcon(a))} ${esc(a)}</option>`).join('')}</select>`;
       const fundOpts = `<select name="fund">${fundsIn(r.account).map(f => `<option value="${esc(f)}"${f === r.fund ? ' selected' : ''}>${esc(fIcon(f))} ${esc(f)}</option>`).join('')}</select>`;
       body = `
-        <div class="amount-box"><span class="cur">$</span><input name="amount" value="${esc(r.amount)}" type="number" step="0.01" inputmode="decimal" placeholder="0.00" aria-label="Interest in AUD" required></div>
+        ${keypad(false)}
         <div class="two"><label class="field"><span>Bank account</span>${acctOpts}</label><label class="field"><span>Goes into fund</span>${fundOpts}</label></div>
         <div class="field"><span>Whose interest?</span>${who(r.person, people.concat([['Shared', 'Shared']]))}</div>
         <div class="two">${field('Date paid', 'date', r.date, 'type="date" required')}
@@ -1721,7 +1894,7 @@
       body = `
         <div class="type-cards">${types.map(([k, e, l]) => `<button type="button" data-act="form-adjtype" data-key="${k}" aria-pressed="${F.adjType === k}"><span class="e">${e}</span>${l}</button>`).join('')}</div>
         <div class="field"><span>Whose funds?</span>${who(r.person, people)}</div>
-        <div class="amount-box"><span class="cur">$</span><input name="amount" value="${esc(r.amount)}" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0.00" aria-label="Amount in AUD" required></div>
+        ${keypad(false)}
         ${t === 'Account' ? `<div class="two"><label class="field"><span>From account</span>${acctOpts('fromAccount', r.fromAccount)}</label>
           <label class="field"><span>To account</span>${acctOpts('toAccount', r.toAccount)}</label></div>` : ''}
         <div class="two">
@@ -1733,9 +1906,9 @@
     const kindSwitch = F.kind === 'paybacks'
       ? `<h2 id="form-title">💸 ${F.isNew ? 'Payback / lend' : 'Edit payback'}</h2>`
       : F.isNew
-      ? `<div class="seg kinds" role="group" aria-label="Entry type">${[['income', '💼 Pay'], ['expenses', '🧾 Expense'], ['adjustments', '🔁 Adjust'], ['interest', '🏦 Interest']].map(([k, l]) =>
+      ? `<div class="seg kinds" role="group" aria-label="Entry type">${[['income', '💼 Income'], ['expenses', '🧾 Expense'], ['adjustments', '🔁 Adjust'], ['interest', '🏦 Interest']].map(([k, l]) =>
         `<button type="button" data-act="form-kind" data-key="${k}" aria-pressed="${F.kind === k}">${l}</button>`).join('')}</div>`
-      : `<h2 id="form-title">Edit ${KIND_LABEL[F.kind].toLowerCase()}</h2>`;
+      : `<h2 id="form-title">Edit ${F.kind === 'income' && F.payType === 'other' ? 'other income' : KIND_LABEL[F.kind].toLowerCase()}</h2>`;
     $('#modal').innerHTML = `
       <div class="sheet" role="dialog" aria-modal="true" aria-label="${F.isNew ? 'Add entry' : 'Edit entry'}"><div class="grab"></div>
         <div class="spread" style="margin-bottom:14px">${kindSwitch}<button type="button" class="icon-btn" data-act="close" aria-label="Close" style="flex:none">${ico('close', 18)}</button></div>
@@ -1746,7 +1919,8 @@
             ${F.isNew && F.kind === 'expenses' ? '<button type="button" class="btn" data-act="form-save-more">Save &amp; add another</button>' : ''}
             <button type="submit" class="btn primary grow" data-act="form-save">Save</button></div>
         </form></div>`;
-    updatePreview();
+    if ($('#calc-value')) calcSync();
+    else updatePreview();
   }
 
   function readForm() {
@@ -1762,7 +1936,16 @@
     const M = state.M;
     const r = F.rec;
     const line = (a, b, cls) => `<div class="line"><span>${a}</span><span class="num${cls || ''}">${b}</span></div>`;
-    if (F.kind === 'income') {
+    const myrLine = () => (r.currency === 'MYR' && !blank(r.fxAmount) ? line('Typed in MYR', `${myr(Number(r.fxAmount))} ÷ ${r.fxRate}`) : '');
+    if (F.kind === 'income' && F.payType === 'other') {
+      const amt = Number(r.amount) || 0;
+      const c = E.compute({ settings: state.app.data.settings, income: [{ id: 'preview', date: r.date, person: r.person, days: 0, otherNet: amt, intoFund: r.intoFund }] }).income[0];
+      const into = r.intoFund ? `${esc(fIcon(r.intoFund))} ${esc(r.intoFund)} <span class="muted small">${esc((fundOf(r.intoFund) || {}).account || '')}</span>` : 'Split across funds like pay';
+      el.innerHTML = line('Adds', `<strong class="pos">+${money(amt)}</strong>`) + myrLine() + line('Goes into', into) +
+        line('Tax', r.otherTaxable === 'Yes' ? 'Counted as taxable income' : 'Not taxable') +
+        (c && !r.intoFund && amt ? `<div style="margin-top:6px">${stackBar(M.fundNames.map(f => ({ label: f, value: c.alloc[f], colour: fColour(f) })))}</div>
+          <div class="legend">${M.fundNames.map(f => `<span><span class="dot" style="--c:${fColour(f)}"></span>${esc(f)} ${money(c.alloc[f])}</span>`).join('')}</div>` : '');
+    } else if (F.kind === 'income') {
       const c = E.compute({ settings: state.app.data.settings, income: [Object.assign({ id: 'preview' }, r)] }).income[0];
       if (!c) { el.innerHTML = '<span class="muted">Choose a date and person.</span>'; return; }
       el.innerHTML = line('Hours', `${c.days} × ${c.hoursPerDay} + ${c.extraHours} = <strong>${hrs(c.hours)}</strong>`) +
@@ -1776,6 +1959,7 @@
         ${M.accounts.map(a => line(`${esc(aIcon(a))} ${esc(a)}`, money(sumOf(fundsIn(a), f => c.alloc[f])))).join('')}`;
     } else if (F.kind === 'expenses') {
       const cat = M.categories.find(x => x.name === r.category);
+      const fund = r.fund || (cat && cat.fund) || '';
       const amt = Number(r.amount) || 0;
       let split = '';
       if (r.person === 'Shared') {
@@ -1791,7 +1975,7 @@
         const owed = r.person === 'Shared' ? (other === M.codes[0] ? amt * p1 : amt - amt * p1) : r.person === other ? amt : 0;
         if (owed > 0.004) split += line(`⚖️ ${esc(pName(other))} owes ${esc(pName(r.paidBy))}`, `<strong>${money(owed)}</strong>`);
       }
-      el.innerHTML = (cat ? line('Comes out of', `${esc(fIcon(cat.fund))} ${esc(cat.fund)}`) + (fundOf(cat.fund) ? line('Bank account', esc(fundOf(cat.fund).account)) : '') : line('Category', '—')) + split;
+      el.innerHTML = myrLine() + (fund ? line('Comes out of', `${esc(fIcon(fund))} ${esc(fund)}`) + (fundOf(fund) ? line('Bank account', esc(fundOf(fund).account)) : '') : line('Category', '—')) + split;
     } else if (F.kind === 'paybacks') {
       const amt = Number(r.amount) || 0;
       const now = M.split.balance;
@@ -1816,10 +2000,47 @@
     }
   }
 
-  async function saveForm(addAnother, button) {
+  // ---------- saving: show it now, save in the background ----------
+
+  let pendingSaves = 0;
+  const cacheApp = () => { if (window.__trackerCache) window.__trackerCache(state.app); };
+  const refreshLocal = () => { recompute(); render(); cacheApp(); };
+  window.addEventListener('beforeunload', e => {
+    if (pendingSaves > 0) { e.preventDefault(); e.returnValue = ''; } // don't lose a save that's still on its way
+  });
+
+  /** Shows the change straight away, saves it in the background, and undoes it (reopening the form) if the save fails. */
+  function persist(kind, rec, isNew, msg, reopen) {
+    const list = state.app.data[kind] || (state.app.data[kind] = []);
+    const before = list.slice();
+    const i = list.findIndex(r => String(r.id) === String(rec.id));
+    if (i >= 0) list[i] = Object.assign({}, list[i], rec);
+    else list.push(rec);
+    refreshLocal();
+    toast(msg);
+    pendingSaves++;
+    return call('saveEntry', kind, rec, isNew).then(res => {
+      const j = list.findIndex(r => String(r.id) === String(rec.id));
+      if (j >= 0 && res && res.record) list[j] = Object.assign({}, list[j], res.record);
+      cacheApp();
+    }).catch(err => {
+      state.app.data[kind] = before;
+      refreshLocal();
+      toast('Couldn’t save: ' + errText(err), true);
+      if (reopen && !state.form) openForm(reopen.kind, reopen.rec, { isNew: reopen.isNew, payType: reopen.payType, adjType: reopen.adjType });
+    }).then(() => { pendingSaves--; });
+  }
+
+  function saveForm(addAnother) {
     readForm();
     const F = state.form;
     const payload = Object.assign({}, F.rec);
+    const needsAmount = F.kind !== 'income' || F.payType === 'other';
+    if (needsAmount) {
+      const amt = Number(payload.amount);
+      if (blank(payload.amount) || !isFinite(amt) || amt === 0) { toast('Enter an amount with the keypad.', true); return; }
+      if (['adjustments', 'paybacks'].indexOf(F.kind) >= 0 && amt < 0) { toast('The amount must be more than $0.', true); return; }
+    }
     if (F.kind === 'expenses') payload.splitPct = payload.person === 'Shared' && !blank(payload.splitPct) ? Number(payload.splitPct) / 100 : '';
     if (F.kind === 'interest') delete payload.account;
     if (F.kind === 'adjustments') {
@@ -1829,30 +2050,42 @@
       delete payload.fromAccount;
       delete payload.toAccount;
     }
-    button.disabled = true;
-    try {
-      await serverUpdate('saveRecord', [F.kind, payload], F.isNew ? '✓ ' + KIND_LABEL[F.kind] + ' added' : '✓ Saved');
-      store.set('lastPerson', payload.person);
-      if (F.kind === 'expenses') store.set('lastCategory', payload.category);
-      if (addAnother) openForm(F.kind, newRecord(F.kind, { date: payload.date, person: payload.person, category: payload.category }));
-      else closeModal();
-    } catch (err) {
-      button.disabled = false;
-      toast(errText(err), true);
+    if (F.kind === 'income' && F.payType === 'other') {
+      Object.assign(payload, { otherNet: payload.amount, days: 0, hoursPerDay: '', extraHours: '', rate: '', scale: '', actualTax: '' });
     }
+    if (F.kind === 'income') delete payload.amount;
+    if (F.kind !== 'expenses' && !(F.kind === 'income' && F.payType === 'other')) {
+      delete payload.currency;
+      delete payload.fxAmount;
+      delete payload.fxRate;
+    }
+    const isNew = F.isNew || !payload.id;
+    if (!payload.id) payload.id = newId(F.kind);
+    if (payload.person) store.set('lastPerson', payload.person);
+    if (F.kind === 'expenses') store.set('lastCategory', payload.category);
+    const reopen = { kind: F.kind, rec: Object.assign({}, F.rec), isNew: F.isNew, payType: F.payType, adjType: F.adjType };
+    const label = F.kind === 'income' && F.payType === 'other' ? 'Income' : KIND_LABEL[F.kind];
+    if (addAnother) openForm(F.kind, newRecord(F.kind, { date: payload.date, person: payload.person, category: payload.category }));
+    else closeModal();
+    persist(reopen.kind, payload, isNew, isNew ? '✓ ' + label + ' added' : '✓ Saved', reopen);
   }
 
-  async function deleteForm(button) {
+  function deleteForm() {
     const F = state.form;
     if (!confirm('Delete this ' + KIND_LABEL[F.kind].toLowerCase() + '? This can\'t be undone.')) return;
-    button.disabled = true;
-    try {
-      await serverUpdate('deleteRecord', [F.kind, F.rec.id], 'Deleted');
-      closeModal();
-    } catch (err) {
-      button.disabled = false;
-      toast(errText(err), true);
-    }
+    const kind = F.kind;
+    const id = F.rec.id;
+    const before = (state.app.data[kind] || []).slice();
+    state.app.data[kind] = before.filter(r => String(r.id) !== String(id));
+    closeModal();
+    refreshLocal();
+    toast('Deleted');
+    pendingSaves++;
+    call('deleteEntry', kind, id).catch(err => {
+      state.app.data[kind] = before;
+      refreshLocal();
+      toast('Couldn’t delete: ' + errText(err), true);
+    }).then(() => { pendingSaves--; });
   }
 
   // ======================================================================
@@ -2029,15 +2262,20 @@
       rec.days = Number(el.dataset.days);
       if (act === 'paycheck-change') openForm('income', rec, { isNew: true });
       else {
-        el.disabled = true;
-        serverUpdate('saveRecord', ['income', rec], '✓ ' + pName(key) + '’s pay recorded').catch(err => { el.disabled = false; toast(errText(err), true); });
+        rec.id = newId('income');
+        persist('income', rec, true, '✓ ' + pName(key) + '’s pay recorded');
       }
     } else if (act === 'paycheck-skip') {
       store.set('skip-pay-' + key + '-' + el.dataset.date, '1');
       render();
     } else if (act === 'xfer-done') {
-      el.disabled = true;
-      serverUpdate('markTransferred', [key.split(',')], '✓ Marked as transferred').catch(err => { el.disabled = false; toast(errText(err), true); });
+      const ids = key.split(',');
+      const before = state.app.data.income.map(r => Object.assign({}, r));
+      state.app.data.income.forEach(r => { if (ids.indexOf(String(r.id)) >= 0) r.transferred = state.M.today; });
+      refreshLocal();
+      toast('✓ Marked as transferred');
+      pendingSaves++;
+      call('markTransferred', ids).catch(err => { state.app.data.income = before; refreshLocal(); toast(errText(err), true); }).then(() => { pendingSaves--; });
     } else if (act === 'clear-all') {
       const typed = prompt('This deletes EVERY pay, expense, adjustment and interest entry. Settings and tax tables are kept.\n\nType DELETE to confirm.');
       if (typed === null) return;
@@ -2133,7 +2371,7 @@
       if (F.kind === 'expenses' && key !== 'Shared' && (!F.rec.paidBy || F.rec.paidBy === F.rec.person)) F.rec.paidBy = key; // usually you pay your own
       F.rec.person = key;
       renderForm();
-    } else if (act === 'form-cat') { readForm(); state.form.rec.category = key; renderForm(); }
+    } else if (act === 'form-cat') { readForm(); state.form.rec.category = key; state.form.rec.fund = ''; renderForm(); }
     else if (act === 'form-step') {
       const input = $('#entry-form [name="' + key + '"]');
       const next = Math.max(key === 'extraHours' ? -1e9 : 0, (Number(input.value) || 0) + Number(el.dataset.step));
@@ -2143,8 +2381,22 @@
     } else if (act === 'form-adjtype') { readForm(); state.form.adjType = key; renderForm(); }
     else if (act === 'form-paidby') { readForm(); state.form.rec.paidBy = key; renderForm(); }
     else if (act === 'form-from') { readForm(); state.form.rec.from = key; state.form.rec.to = state.M.codes.find(c => c !== key) || key; renderForm(); }
-    else if (act === 'form-save-more') saveForm(true, el);
-    else if (act === 'form-delete') deleteForm(el);
+    else if (act === 'form-save-more') saveForm(true);
+    else if (act === 'form-delete') deleteForm();
+    else if (act === 'calc') calcKey(key);
+    else if (act === 'calc-cur') {
+      readForm();
+      const c = state.form.calc;
+      if (c.cur !== key) { c.cur = key; c.expr = ''; }
+      renderForm();
+    } else if (act === 'form-paytype') {
+      readForm();
+      const F = state.form;
+      F.payType = key;
+      if (key === 'other') { F.calc = { cur: 'AUD', rate: state.M.general.exchangeRate, expr: '' }; F.rec.amount = ''; }
+      renderForm();
+    } else if (act === 'form-taxable') { readForm(); state.form.rec.otherTaxable = key; renderForm(); }
+    else if (act === 'add-other') openForm('income', null, { payType: 'other' });
     else if (act === 'grid-add') {
       document.querySelector('#' + key + ' tbody').insertAdjacentHTML('beforeend', gridRow(GRIDS[key], null));
       if (key === 'g-alloc') updateAllocTotals();
@@ -2170,6 +2422,13 @@
   });
 
   document.addEventListener('keydown', e => {
+    // On a computer, type amounts straight into the keypad.
+    const tag = (document.activeElement || {}).tagName || '';
+    if (state.form && state.form.calc && $('#calc-value') && ['INPUT', 'TEXTAREA', 'SELECT'].indexOf(tag) < 0) {
+      const map = { '*': '×', x: '×', '/': '÷', '-': '−', '+': '+', Backspace: '⌫', Delete: 'C', '=': '=', Enter: '=' };
+      const k = '0123456789.'.indexOf(e.key) >= 0 && e.key.length === 1 ? e.key : map[e.key];
+      if (k) { e.preventDefault(); calcKey(k); return; }
+    }
     if (e.key === 'Escape' && !$('#modal').hidden) closeModal();
     // Enter / space on list rows acts like a tap.
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"][data-act]')) { e.preventDefault(); e.target.click(); }
@@ -2216,6 +2475,10 @@
   });
 
   document.addEventListener('input', e => {
+    if (state.form && state.form.calc) {
+      if (e.target.id === 'calc-rate') { state.form.calc.rate = e.target.value; calcSync(); return; }
+      if (e.target.name === 'amount') state.form.calc.expr = exprOf(e.target.value); // filled in some other way
+    }
     if (e.target.id === 'search') {
       state.q = e.target.value;
       $('#bills').innerHTML = billsHtml();
@@ -2234,7 +2497,7 @@
   document.addEventListener('submit', e => {
     if (e.target.id === 'entry-form') {
       e.preventDefault();
-      saveForm(false, e.target.querySelector('[data-act="form-save"]'));
+      saveForm(false);
     }
   });
 

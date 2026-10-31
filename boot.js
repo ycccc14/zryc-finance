@@ -13,6 +13,8 @@
   };
   var started = false;
   window.__PWA__ = true;
+  // The app saves changes in the background; keep the copy used for instant start-up current.
+  window.__trackerCache = function (app) { store.set(CACHE, JSON.stringify(app)); };
 
   if ('serviceWorker' in navigator) {
     var hadController = !!navigator.serviceWorker.controller;

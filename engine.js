@@ -332,16 +332,21 @@ function TrackerEngine() {
       const ty = S.taxYears[fy];
       if (!ty) warn('No tax-year settings for ' + fy + ', so super shows as $0. Add a row in Settings → Tax tables.');
       const superRate = ty ? ty.superRate : 0;
-      const otherNet = round2(num(r.otherNet)); // e.g. a tax refund: added to net, not taxed, no super
+      const otherNet = round2(num(r.otherNet)); // other income (gift, refund, side job…): added to net, no super
+      const intoFund = fundNames.indexOf(String(r.intoFund || '').trim()) >= 0 ? String(r.intoFund).trim() : '';
+      const otherTaxable = otherNet && yes(r.otherTaxable) ? otherNet : 0;
       const net = round2(gross - tax + otherNet);
       const version = allocationFor(r.date, S.allocations);
       const alloc = {};
-      fundNames.forEach(f => { alloc[f] = version ? net * (version.pct[f] || 0) : 0; });
+      // Pay is split by the budget %; other income too, unless it goes into one chosen fund.
+      const splitPart = intoFund ? net - otherNet : net;
+      fundNames.forEach(f => { alloc[f] = version ? splitPart * (version.pct[f] || 0) : 0; });
+      if (intoFund) alloc[intoFund] += otherNet;
       return {
         id: r.id, date: r.date, person: p.code, fy, month: monthOf(r.date), week: weekStart(r.date),
         days, hoursPerDay, extraHours, hours, rate, scale, gross, calcTax, actualTax, tax,
         taxDiff: hasActual ? round2(actualTax - calcTax) : 0,
-        otherNet, net, superRate, superAmt: round2(gross * superRate), alloc, note: r.note || '',
+        otherNet, intoFund, otherTaxable, net, superRate, superAmt: round2(gross * superRate), alloc, note: r.note || '',
         transferred: validDate(String(r.transferred || '')) ? r.transferred : '',
       };
     }).filter(Boolean).sort(byDate);
@@ -351,7 +356,8 @@ function TrackerEngine() {
       if (!validDate(r.date)) { warn('An expense has no valid date and was skipped.'); return null; }
       const amount = round2(num(r.amount));
       const category = String(r.category || '').trim();
-      const fund = catFund[category] || '';
+      const chosen = String(r.fund || '').trim();
+      const fund = fundNames.indexOf(chosen) >= 0 ? chosen : (catFund[category] || '');
       if (!fund) warn('Expense category "' + category + '" has no fund, so it is left out of fund balances. Map it in Settings → Categories.');
       const shares = {};
       let splitPct = null;
@@ -424,13 +430,13 @@ function TrackerEngine() {
 
     // --- weekly / monthly / FY income totals ---
     function newTotals() {
-      const t = { count: 0, hours: 0, gross: 0, calcTax: 0, tax: 0, taxDiff: 0, net: 0, superAmt: 0, alloc: {} };
+      const t = { count: 0, hours: 0, gross: 0, calcTax: 0, tax: 0, taxDiff: 0, net: 0, superAmt: 0, otherNet: 0, otherTaxable: 0, alloc: {} };
       fundNames.forEach(f => { t.alloc[f] = 0; });
       return t;
     }
     function addTotals(t, r) {
       t.count++;
-      ['hours', 'gross', 'calcTax', 'tax', 'taxDiff', 'net', 'superAmt'].forEach(k => { t[k] += r[k]; });
+      ['hours', 'gross', 'calcTax', 'tax', 'taxDiff', 'net', 'superAmt', 'otherNet', 'otherTaxable'].forEach(k => { t[k] += r[k]; });
       fundNames.forEach(f => { t.alloc[f] += r.alloc[f]; });
     }
     function bucket(map, key, extra) {
@@ -606,11 +612,11 @@ function TrackerEngine() {
       estimates[fy] = {};
       codes.forEach(c => {
         const t = fyTotals[fy].by[c];
-        const extra = fyTotals[fy].interest[c] || 0;
+        const extra = (fyTotals[fy].interest[c] || 0) + (t.otherTaxable || 0); // interest + taxable other income
         if (!t.count && !extra) return;
         const p = byCode[c];
         const est = annualTax(t.gross + extra, fy, p, S, warn);
-        const e = { gross: t.gross, interest: extra, withheld: t.tax, est, refund: est ? round2(t.tax - est.total) : null, projection: null };
+        const e = { gross: t.gross, interest: fyTotals[fy].interest[c] || 0, otherTaxable: t.otherTaxable || 0, withheld: t.tax, est, refund: est ? round2(t.tax - est.total) : null, projection: null };
         if (fy === currentFY && est && t.count) {
           // Project the year at the pace so far, counted from the person's first pay week.
           const first = income.find(r => r.person === c && r.fy === fy).date;
