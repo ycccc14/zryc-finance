@@ -320,7 +320,9 @@
       const el = document.getElementById(id);
       if (!el) return;
       if (!window.Chart) {
-        el.parentNode.innerHTML = '<p class="muted small">Charts could not load. Check your connection and press Refresh.</p>';
+        // Still downloading (or blocked): draw the charts when it arrives.
+        el.parentNode.insertAdjacentHTML('beforeend', '<p class="muted small" style="position:absolute;inset:0;display:grid;place-items:center">Loading chart…</p>');
+        window.__chartReady = () => { window.__chartReady = null; if (state.M && !state.form) render(); };
         return;
       }
       const css = getComputedStyle(document.documentElement);
@@ -2249,8 +2251,14 @@
   } else {
     const P = window.__PARAMS__ || {};
     if (P.page && VIEWS.some(v => v[0] === P.page)) state.view = P.page;
-    recompute();
-    render();
+    try {
+      recompute();
+      render();
+    } catch (err) {
+      $view.innerHTML = `<section class="card"><p><strong>The app couldn’t start.</strong> Please send this to the developer:</p>
+        <p class="muted small">${esc(err && err.stack || err)}</p><button class="btn primary" onclick="location.reload()">Try again</button></section>`;
+      throw err;
+    }
     if (P.add === 'pay') {
       const rec = newRecord('income', { person: P.person, date: /^\d{4}-\d{2}-\d{2}$/.test(P.date || '') ? P.date : '' });
       if (P.days) rec.days = Number(P.days);

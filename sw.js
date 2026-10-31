@@ -1,6 +1,6 @@
 // Keeps the app's files on the phone so it opens instantly (data always comes fresh from the API).
-const CACHE = 'zryc-5f415e8881';
-const FILES = ['./', 'index.html', 'app.js?v=5f415e8881', 'engine.js?v=5f415e8881', 'boot.js?v=5f415e8881', 'vendor/chart.umd.js', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-32.png'];
+const CACHE = 'zryc-26663107e6';
+const FILES = ['./', 'index.html', 'app.js?v=26663107e6', 'engine.js?v=26663107e6', 'boot.js?v=26663107e6', 'vendor/chart.umd.js', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-32.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
