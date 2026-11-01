@@ -616,8 +616,8 @@
     const log = activity({ income: true }).filter(it => (M.income.find(r => r.id === it.id) || {}).fy === fy);
     return `
       <div class="section-title"><h1>Income</h1><div class="row">${fySelect(fy, 'fy')}${addBtn('income', 'Pay')}<button class="btn" data-act="add-other">💰 Other</button></div></div>
-      <div class="stats">${stat('Net income', money(T.net), T.count + ' pays')}${stat('Gross', money(T.gross), hrs(T.hours))}${stat('Tax withheld', money(T.tax))}${stat('Super (employer)', money(T.superAmt), 'not in net')}</div>
-      <section class="card"><div class="card-head"><h2>Week by week</h2><span class="hint">${fyName(fy)}</span></div>
+      <div class="stats">${stat('Net income', money(T.net), T.count + ' pays')}${stat('Gross income', money(T.gross), hrs(T.hours))}${stat('Tax withheld', money(T.tax))}${stat('Super', money(T.superAmt), '')}</div>
+      <section class="card"><div class="card-head"><h2>Weekly</h2><span class="hint">${fyName(fy)}</span></div>
         ${weeks.length ? table(head, body, foot) : empty('💼', `No pay entered for ${fyName(fy)} yet.`, addBtn('income', 'Add pay'))}
         <p class="muted small">Tax uses the ATO weekly withholding formula for the pay date’s financial year. Enter the payslip tax to use the real figure; any difference is flagged.</p></section>
       <section class="card flush"><div class="card-head"><h2>Pay log</h2><span class="hint">Tap to edit</span></div>
@@ -699,7 +699,7 @@
         scales: { y: { beginAtZero: true, border: { display: false }, ticks: { callback: v => '$' + v } }, x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } } },
       },
     });
-    const daily = `<section class="card"><div class="card-head"><h2>Day by day</h2><span class="hint">Average ${money(total / daysSoFar)}/day${peak[0] >= 0 ? ' · peak ' + money(peak[1]) + ' on ' + dayLabel(days[peak[0]]) : ''}</span></div>
+    const daily = `<section class="card"><div class="card-head"><h2>Daily Breakdown</h2><span class="hint">Average ${money(total / daysSoFar)}/day${peak[0] >= 0 ? ' · peak ' + money(peak[1]) + ' on ' + dayLabel(days[peak[0]]) : ''}</span></div>
       <div class="chart-box"><canvas id="ch-daily" role="img" aria-label="Spending per day in ${monthLong(m)}"></canvas></div>
       <details class="more"><summary>View as table</summary>${table('<tr><th>Day</th><th class="num">Spent</th></tr>',
         days.map((d, i) => (dayTotals[i] > 0.004 ? `<tr><td>${dayLabel(d)}</td><td class="num">${money(dayTotals[i])}</td></tr>` : '')).join(''))}</details></section>`;
@@ -724,7 +724,7 @@
       return `<tr><td class="sticky">${fmtMonth(x)}</td>${used.map(c => `<td class="num">${dash(row[c] || 0)}</td>`).join('')}<td class="num"><strong>${dash(sumOf(used, c => row[c] || 0))}</strong></td></tr>`;
     }).join('');
     const foot = `<tr class="total"><td class="sticky">Total</td>${used.map(c => `<td class="num">${money(catTotals[c])}</td>`).join('')}<td class="num">${money(sumOf(used, c => catTotals[c]))}</td></tr>`;
-    const yearCard = `<section class="card"><div class="card-head"><h2>Year by category</h2>${fySelect(fy, 'fy')}</div>
+    const yearCard = `<section class="card"><div class="card-head"><h2>Monthly Breakdown</h2>${fySelect(fy, 'fy')}</div>
       ${used.length ? table(head, body, foot) : empty('📊', `No expenses in ${fyName(fy)}.`)}
       <p class="muted small">Shared expenses count toward each person by their split.</p></section>`;
 
@@ -880,7 +880,7 @@
           <td class="num">${dash(x.transferIn - x.transferOut)}</td><td class="num">${dash(x.added - x.deducted)}</td>
           <td class="num${neg(x.in - x.out)}">${signed(x.in - x.out)}</td><td class="num${neg(x.balance)}"><strong>${money(x.balance)}</strong></td></tr>`;
       }).join('');
-      return `<details class="more"${open ? ' open' : ''}><summary>${esc(aIcon(a))} ${esc(a)} — month by month</summary>${table(
+      return `<details class="more"${open ? ' open' : ''}><summary>${esc(aIcon(a))} ${esc(a)} — monthly</summary>${table(
         '<tr><th class="sticky">Month</th><th class="num">Pay in</th><th class="num">Spent</th><th class="num">Transfers</th><th class="num">Added / taken</th><th class="num">Change</th><th class="num">Balance</th></tr>',
         body, `<tr class="total"><td class="sticky">Total</td><td class="num">${money(A.allocated)}</td><td class="num">${money(-A.spent)}</td><td class="num">${signed(A.transferIn - A.transferOut)}</td><td class="num">${signed(A.added - A.deducted)}</td><td class="num">${signed(A.balance)}</td><td class="num">${money(A.balance)}</td></tr>`)}</details>`;
     };
@@ -894,7 +894,7 @@
       <div class="section-title"><h1>Accounts</h1><button class="btn primary" data-act="acct-transfer" data-key="${esc(accts[0] || '')}">${ico('plus', 18)}Transfer</button></div>
       ${hero}
       <div class="cols">${cards}</div>
-      <section class="card"><div class="card-head"><h2>Balance over time</h2><span class="hint">${shown.length ? fmtMonth(shown[0]) + ' – ' + fmtMonth(shown[shown.length - 1]) : ''}</span></div>
+      <section class="card"><div class="card-head"><h2>Balance</h2><span class="hint">${shown.length ? fmtMonth(shown[0]) + ' – ' + fmtMonth(shown[shown.length - 1]) : ''}</span></div>
         ${shown.length ? `<div class="chart-box"><canvas id="ch-accounts" role="img" aria-label="Running balance of each bank account by month"></canvas></div>` : empty('🏦', 'No activity yet.')}
         ${accts.map((a, i) => ledger(a, i === 0)).join('')}
         <p class="muted small">Pay is split into the accounts by the fund mapping (Settings → Funds). Balances count from ${fmtDate(M.general.startDate)}; add an opening balance for money that was already in an account.</p></section>
@@ -1077,7 +1077,7 @@
     const body = months.map(m => `<tr><td class="sticky">${fmtMonth(m)}</td>${accts.map(a => `<td class="num">${dash(cell(m, a))}</td>`).join('')}
       <td class="num"><strong>${dash(sumOf(accts, a => cell(m, a)))}</strong></td></tr>`).join('');
     const foot = `<tr class="total"><td class="sticky">${fyName(fy)}</td>${accts.map(a => `<td class="num">${money(sumOf(inFy.filter(r => r.account === a), share))}</td>`).join('')}<td class="num">${money(fyTotal)}</td></tr>`;
-    const monthly = `<section class="card"><div class="card-head"><h2>Month by month</h2><span class="hint">${fyName(fy)}</span></div>
+    const monthly = `<section class="card"><div class="card-head"><h2>Monthly</h2><span class="hint">${fyName(fy)}</span></div>
       ${inFy.length ? `<div class="chart-box"><canvas id="ch-interest" role="img" aria-label="Bank interest per month by account"></canvas></div>` : ''}
       ${table(head, body, foot)}</section>`;
 
@@ -1133,7 +1133,7 @@
     });
     const monthTable = table(`<tr><th>Month</th>${codes.map(c => `<th class="num">${esc(pName(c))}</th>`).join('')}</tr>`,
       months.map(x => `<tr><td>${fmtMonth(x)}</td>${codes.map(c => `<td class="num">${dash(M.monthly[x] ? M.monthly[x].by[c].superAmt : 0)}</td>`).join('')}</tr>`).join(''));
-    const chartCard = `<section class="card"><div class="card-head"><h2>Month by month</h2><span class="hint">${fyName(fy)}</span></div>
+    const chartCard = `<section class="card"><div class="card-head"><h2>Monthly</h2><span class="hint">${fyName(fy)}</span></div>
       ${rows.length ? `<div class="chart-box"><canvas id="ch-super" role="img" aria-label="Super per month in ${fyName(fy)}"></canvas></div>
         <details class="more"><summary>View as table</summary>${monthTable}</details>` : empty('🦘', `No pay in ${fyName(fy)} yet.`)}</section>`;
 
@@ -1952,7 +1952,7 @@
         line('Gross pay', money(c.gross)) +
         line(`Tax withheld <span class="muted small">(${c.fy}, scale ${esc(c.scale)})</span>`, c.actualTax === null ? '−' + money(c.calcTax) : `−${money(c.actualTax)} <span class="${Math.abs(c.taxDiff) > 0.004 ? 'flag' : 'muted'} small">(calc ${money(c.calcTax)})</span>`) +
         '<hr>' + `<div class="line"><strong>Net pay</strong><span class="net pos">${money(c.net)}</span></div>` +
-        line(`Super <span class="muted small">(employer, ${pctf(c.superRate)}, not in net)</span>`, money(c.superAmt)) +
+        line(`Super <span class="muted small">(employer, ${pctf(c.superRate)})</span>`, money(c.superAmt)) +
         `<div style="margin-top:6px">${stackBar(M.fundNames.map(f => ({ label: f, value: c.alloc[f], colour: fColour(f) })))}</div>
         <div class="legend">${M.fundNames.map(f => `<span><span class="dot" style="--c:${fColour(f)}"></span>${esc(f)} ${money(c.alloc[f])}</span>`).join('')}</div>
         <hr><div class="line"><strong>Goes to</strong></div>
