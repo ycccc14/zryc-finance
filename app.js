@@ -600,25 +600,25 @@
     const codes = showCodes();
     const rows = M.income.filter(r => r.fy === fy && codes.indexOf(r.person) >= 0);
     const T = agg(rows);
-    const weeks = Array.from(new Set(rows.map(r => r.week))).sort().reverse();
+    const months = Array.from(new Set(rows.map(r => r.month))).sort().reverse();
     const cols = ['Hours', 'Gross', 'Tax', 'Net', 'Super'];
     const cellsFor = t => [hrs(t.hours), money(t.gross), money(t.tax), `<strong>${money(t.net)}</strong>`, money(t.superAmt)]
       .map(v => `<td class="num">${v}</td>`).join('');
     const both = codes.length > 1;
     const head = `<tr class="group"><th class="sticky"></th>${codes.map(c => `<th colspan="5">${chip(c)}</th>`).join('')}${both ? '<th></th>' : ''}</tr>
-      <tr><th class="sticky">Week of</th>${codes.map(() => cols.map(h => `<th class="num">${h}</th>`).join('')).join('')}${both ? '<th class="num">Combined net</th>' : ''}</tr>`;
-    const body = weeks.map(w => {
-      const wr = rows.filter(r => r.week === w);
-      return `<tr><td class="sticky">${dayMonth(w)}</td>${codes.map(c => cellsFor(agg(wr.filter(r => r.person === c)))).join('')}${both ? `<td class="num"><strong>${money(agg(wr).net)}</strong></td>` : ''}</tr>`;
+      <tr><th class="sticky">Month</th>${codes.map(() => cols.map(h => `<th class="num">${h}</th>`).join('')).join('')}${both ? '<th class="num">Combined net</th>' : ''}</tr>`;
+    const body = months.map(m => {
+      const mr = rows.filter(r => r.month === m);
+      return `<tr><td class="sticky">${fmtMonth(m)}</td>${codes.map(c => cellsFor(agg(mr.filter(r => r.person === c)))).join('')}${both ? `<td class="num"><strong>${money(agg(mr).net)}</strong></td>` : ''}</tr>`;
     }).join('');
-    const foot = weeks.length ? `<tr class="total"><td class="sticky">Total</td>${codes.map(c => cellsFor(agg(rows.filter(r => r.person === c)))).join('')}${both ? `<td class="num">${money(T.net)}</td>` : ''}</tr>` : '';
+    const foot = months.length ? `<tr class="total"><td class="sticky">Total</td>${codes.map(c => cellsFor(agg(rows.filter(r => r.person === c)))).join('')}${both ? `<td class="num">${money(T.net)}</td>` : ''}</tr>` : '';
 
     const log = activity({ income: true }).filter(it => (M.income.find(r => r.id === it.id) || {}).fy === fy);
     return `
       <div class="section-title"><h1>Income</h1><div class="row">${fySelect(fy, 'fy')}${addBtn('income', 'Pay')}<button class="btn" data-act="add-other">💰 Other</button></div></div>
       <div class="stats">${stat('Net income', money(T.net), T.count + ' pays')}${stat('Gross income', money(T.gross), hrs(T.hours))}${stat('Tax withheld', money(T.tax))}${stat('Super', money(T.superAmt), '')}</div>
-      <section class="card"><div class="card-head"><h2>Weekly</h2><span class="hint">${fyName(fy)}</span></div>
-        ${weeks.length ? table(head, body, foot) : empty('💼', `No pay entered for ${fyName(fy)} yet.`, addBtn('income', 'Add pay'))}
+      <section class="card"><div class="card-head"><h2>Monthly</h2><span class="hint">${fyName(fy)}</span></div>
+        ${months.length ? table(head, body, foot) : empty('💼', `No pay entered for ${fyName(fy)} yet.`, addBtn('income', 'Add pay'))}
         <p class="muted small">Tax uses the ATO weekly withholding formula for the pay date’s financial year. Enter the payslip tax to use the real figure; any difference is flagged.</p></section>
       <section class="card flush"><div class="card-head"><h2>Pay log</h2><span class="hint">Tap to edit</span></div>
         ${log.length ? txRows(log) : empty('💼', 'Nothing yet.')}</section>`;
@@ -792,9 +792,10 @@
     const amount = (v, isBalance) => `<td class="num${isBalance && v < -0.004 ? ' neg-cell' : neg(v)}">${isBalance ? money(v) : dash(v)}</td>`;
     const head = `<tr><th class="sticky"></th>${funds.map(f => `<th class="num">${esc(fIcon(f))} ${esc(f)}</th>`).join('')}<th class="num">Total</th></tr>`;
     const body = [
-      row('Allocated from pay', F => amount(F.allocated)),
+      row('Allocated from income', F => amount(F.allocated)),
       B.months.map(m => row('Spent ' + fmtMonth(m), F => amount(-(F.monthly[m] || 0)))).join(''),
       row('Adjustments', F => amount(F.adjustments)),
+      row('Bank interest', F => amount(F.interest)),
       row('Balance', F => amount(F.balance, true), 'balance'),
       row('% used', (F, name) => `<td class="num"><div class="small">${pctf(F.usedPct)}</div><div class="bar${F.usedPct > 1 ? ' over' : ''}" style="min-width:70px"><span style="--w:${(clamp01(F.usedPct) * 100).toFixed(1)}%;--c:${name ? fColour(name) : 'var(--accent)'}"></span></div></td>`),
       row('Balance (MYR)', F => `<td class="num muted">${myr(F.balance * M.general.exchangeRate)}</td>`),
@@ -815,7 +816,7 @@
     const adj = activity({ adjustments: true });
     return `
       <div class="section-title"><h1>Funds</h1>${addBtn('adjustments', 'Adjustment')}</div>
-      <p class="muted small" style="margin:0">Balance = allocated from pay − expenses ± adjustments, counted from ${fmtDate(M.general.startDate)}.</p>
+      <p class="muted small" style="margin:0">Balance = allocated from income (pay and other income) − expenses ± adjustments + bank interest, counted from ${fmtDate(M.general.startDate)}.</p>
       <div class="funds">${M.fundNames.map(f => fundCard(B.funds[f], f)).join('')}</div>
       ${keys.map(balanceTable).join('')}
       <section class="card flush"><div class="card-head"><h2>Adjustments</h2><span class="hint">Transfers, extra pay, opening balances, fixes</span></div>

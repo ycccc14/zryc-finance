@@ -363,8 +363,8 @@ function TrackerEngine() {
       let splitPct = null;
       if (r.person === SHARED && codes.length >= 2) {
         splitPct = isBlank(r.splitPct) ? S.general.sharedSplit : pct(r.splitPct);
-        shares[codes[0]] = amount * splitPct;
-        shares[codes[1]] = amount - amount * splitPct;
+        shares[codes[0]] = round2(amount * splitPct); // whole cents: an odd cent goes to the first person
+        shares[codes[1]] = round2(amount - shares[codes[0]]);
       } else if (byCode[r.person]) {
         shares[r.person] = amount;
       } else {
@@ -406,8 +406,8 @@ function TrackerEngine() {
       const amount = round2(num(r.amount));
       const shares = {};
       if (r.person === SHARED && codes.length >= 2) {
-        shares[codes[0]] = amount * S.general.sharedSplit;
-        shares[codes[1]] = amount - shares[codes[0]];
+        shares[codes[0]] = round2(amount * S.general.sharedSplit);
+        shares[codes[1]] = round2(amount - shares[codes[0]]);
       } else if (byCode[r.person]) {
         shares[r.person] = amount;
       } else {
