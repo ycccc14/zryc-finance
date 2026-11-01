@@ -424,7 +424,7 @@
     const over = F.balance < -0.004;
     return `<div class="fund${over ? ' over' : ''}">
       <div class="top">${tile(fIcon(name), fColour(name))}<div class="stack" style="gap:0;min-width:0"><span class="name">${esc(name)}</span><span class="acct">${esc(fundOf(name).account)}</span></div></div>
-      <div class="spread"><span class="bal${neg(F.balance)}">${money(F.balance)}</span>${over ? '<span class="tag bad">⚠ Overspent</span>' : ''}</div>
+      <div class="spread"><div class="stack" style="gap:0;min-width:0"><span class="bal${neg(F.balance)}">${money(F.balance)}</span><span class="myr">${myr(F.balance * state.M.general.exchangeRate)}</span></div>${over ? '<span class="tag bad">⚠ Overspent</span>' : ''}</div>
       <div class="bar${F.usedPct > 1 ? ' over' : ''}" role="img" aria-label="${pctf(F.usedPct)} used"><span style="--w:${(clamp01(F.usedPct) * 100).toFixed(1)}%;--c:${fColour(name)}"></span></div>
       <div class="meta"><span>${pctf(F.usedPct)} used</span><span>${money(F.expenses)} of ${money(F.available)}</span></div></div>`;
   }
