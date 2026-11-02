@@ -131,6 +131,7 @@
     const app = await call.apply(null, [fn].concat(args));
     state.app = app;
     state.loadedAt = Date.now();
+    cacheApp();
     recompute();
     render();
     if (okMsg) toast(okMsg);
@@ -234,6 +235,8 @@
   function render() {
     state.charts.forEach(c => c.destroy());
     state.charts = [];
+    state.stale = false;
+    state.viewEdited = false;
     renderChrome();
     const v = VIEWS.find(x => x[0] === state.view) || VIEWS[0];
     const M = state.M;
@@ -334,6 +337,7 @@
       Chart.defaults.color = css.getPropertyValue('--muted').trim();
       Chart.defaults.borderColor = css.getPropertyValue('--line').trim();
       Chart.defaults.font.family = css.getPropertyValue('--font').trim();
+      if (state.quiet) config.options = Object.assign({}, config.options, { animation: false }); // background update: no replay
       state.charts.push(new Chart(el, config));
     });
   }
@@ -1031,7 +1035,7 @@
     const settledCard = settled.length ? `<section class="card"><details class="more"><summary>Settled earlier (${settled.length})</summary>
       <div class="tx-list" style="margin:6px -18px 0">${settled.map(row).join('')}</div></details></section>` : '';
     const tip = `<p class="muted small">Add an expense and choose <strong>Who paid?</strong> If ${esc(pName(M.codes[0]))} pays a Shared bill, ${esc(pName(M.codes[1]))} owes their share; if one of you pays something that’s entirely the other’s, they owe all of it.
-      The bill still counts in each person’s budget as usual. With phone notifications on, whoever owes also gets a reminder on Tuesdays.</p>`;
+      The bill still counts in each person’s budget as usual. With phone notifications on, whoever owes gets a notification as soon as a bill is added, and a reminder on Tuesdays.</p>`;
     return hero + add + openCard + settledCard + tip;
   }
 
@@ -1415,11 +1419,12 @@
     }
     const sch = status.schedule;
     const who = c => (c === 'both' ? 'both of you' : pName(c));
+    const hour = h => (h % 12 || 12) + (h < 12 ? ' am' : ' pm');
     const what = `<ul class="small" style="padding-left:20px;margin:0 0 10px;display:grid;gap:3px">
-        <li><strong>Tuesday ${sch.payHour - 12} pm</strong>: did you get paid? Tap to record it (your usual days are filled in).</li>
-        <li><strong>Daily ${sch.remindHour - 12} pm</strong>: pay still to move to Self Saving / Shared Saving, until you tap ✅ Done.</li>
+        <li><strong>Tuesday ${hour(sch.payHour)}</strong>: did you get paid? Tap to record it (your usual days are filled in).</li>
+        <li><strong>Daily ${hour(sch.remindHour)}</strong>: pay still to move to Self Saving / Shared Saving, until you tap ✅ Done.</li>
         <li><strong>1st of the month</strong>: record last month’s bank interest.</li>
-        <li><strong>Split bills</strong>: on Tuesdays, and when the other person taps <strong>Remind</strong>.</li></ul>`;
+        <li><strong>Split bills</strong>: as soon as the other person adds a bill they paid, on Tuesdays, and when they tap <strong>Remind</strong>.</li></ul>`;
     const phones = status.phones.length ? `<h3 style="margin-top:12px">Phones with notifications</h3>${status.phones.map(ph => `<div class="spread" style="padding:6px 0;border-top:1px solid var(--line)">
         <span><strong>${esc(ph.name)}</strong>${ph.me ? ' <span class="tag good">this phone</span>' : ''}<div class="muted small">for ${esc(who(ph.person))}</div></span></div>`).join('')}` : '';
     const personSelect = sel => `<label class="field"><span>Notify this phone about</span><select id="push-person">${state.M.codes.map(c => `<option value="${esc(c)}"${sel === c ? ' selected' : ''}>${esc(pName(c))}</option>`).join('')}
@@ -1750,6 +1755,7 @@
     $('#modal').hidden = true;
     $('#modal').innerHTML = '';
     document.body.style.overflow = '';
+    if (state.stale) renderKeepingPlace(); // changes that arrived while the form was open
   }
 
   function editEntry(kind, id) {
@@ -2082,11 +2088,22 @@
   // ---------- saving: show it now, save in the background ----------
 
   let pendingSaves = 0;
-  const cacheApp = () => { if (window.__trackerCache) window.__trackerCache(state.app); };
-  const refreshLocal = () => { recompute(); render(); cacheApp(); };
+  let localEdits = 0; // changes shown here that a copy loaded from the server earlier won't have
+  // `unsaved`: the iPhone app opened from this copy reloads in full, in case a save never arrived.
+  const cacheApp = () => { if (window.__trackerCache) window.__trackerCache(Object.assign({}, state.app, { unsaved: pendingSaves > 0 })); };
+  const refreshLocal = () => { localEdits++; recompute(); render(); cacheApp(); };
   window.addEventListener('beforeunload', e => {
     if (pendingSaves > 0) { e.preventDefault(); e.returnValue = ''; } // don't lose a save that's still on its way
   });
+
+  /** A background save finished (`res` is the server's answer, or nothing if it failed). */
+  function saveDone(res) {
+    // Nobody else changed anything since our copy was loaded: our copy now matches the new version.
+    if (res && res.ver && res.prev === state.app.ver) state.app.ver = res.ver;
+    pendingSaves--;
+    cacheApp();
+    if (!pendingSaves) setTimeout(checkForUpdates, 0);
+  }
 
   /** Shows the change straight away, saves it in the background, and undoes it (reopening the form) if the save fails. */
   function persist(kind, rec, isNew, msg, reopen) {
@@ -2099,15 +2116,17 @@
     toast(msg);
     pendingSaves++;
     return call('saveEntry', kind, rec, isNew).then(res => {
-      const j = list.findIndex(r => String(r.id) === String(rec.id));
-      if (j >= 0 && res && res.record) list[j] = Object.assign({}, list[j], res.record);
-      cacheApp();
-    }).catch(err => {
+      const now = state.app.data[kind] || [];
+      const j = now.findIndex(r => String(r.id) === String(rec.id));
+      if (j >= 0 && res && res.record) now[j] = Object.assign({}, now[j], res.record);
+      saveDone(res);
+    }, err => {
       state.app.data[kind] = before;
       refreshLocal();
       toast('Couldn’t save: ' + errText(err), true);
       if (reopen && !state.form) openForm(reopen.kind, reopen.rec, { isNew: reopen.isNew, payType: reopen.payType, adjType: reopen.adjType });
-    }).then(() => { pendingSaves--; });
+      saveDone(null);
+    });
   }
 
   function saveForm(addAnother) {
@@ -2160,11 +2179,12 @@
     refreshLocal();
     toast('Deleted');
     pendingSaves++;
-    call('deleteEntry', kind, id).catch(err => {
+    call('deleteEntry', kind, id).then(saveDone, err => {
       state.app.data[kind] = before;
       refreshLocal();
       toast('Couldn’t delete: ' + errText(err), true);
-    }).then(() => { pendingSaves--; });
+      saveDone(null);
+    });
   }
 
   // ======================================================================
@@ -2259,24 +2279,94 @@
     button.disabled = false;
   }
 
-  async function reload(silent) {
+  // ---------- staying up to date ----------
+  // Every change, from either app, any phone or the Sheet itself, gives the data a new version on
+  // the server. While the app is on screen it checks that version every 20 seconds (and as soon as
+  // it comes back to the screen) and quietly loads the latest when it differs.
+
+  let loading = null; // the copy being loaded, if any
+
+  /** Loads the latest data. Redraws only if something changed, keeping your place on the page. */
+  function reload(silent) {
     const btn = $('#btn-refresh');
     if (btn && !silent) btn.style.opacity = '.5';
-    try {
-      const app = await call('getAppData');
-      state.app = app;
-      state.loadedAt = Date.now();
-      recompute();
-      if (state.form) renderChrome();
-      else render();
-      if (!silent) toast('✓ Up to date');
-    } catch (err) {
-      if (!silent) toast(errText(err), true);
+    if (!loading) {
+      const edits = localEdits;
+      loading = call('getAppData').then(app => { loading = null; useLatest(app, edits); }, err => { loading = null; throw err; });
     }
-    if (btn) btn.style.opacity = '';
+    return loading.then(() => {
+      if (silent) return;
+      if (state.stale && !state.form) renderKeepingPlace();
+      toast('✓ Up to date');
+    }, err => {
+      if (!silent) toast(errText(err), true);
+    }).then(() => { if (btn) btn.style.opacity = ''; });
+  }
+
+  function useLatest(app, edits) {
+    if (pendingSaves > 0 || localEdits !== edits) {
+      // Something was changed here while this copy was on its way, so it's already out of date
+      // (this used to bring back a pay that had just been recorded). Check again once saved.
+      if (!pendingSaves) setTimeout(checkForUpdates, 0);
+      return;
+    }
+    const changed = JSON.stringify(app.data) !== JSON.stringify(state.app.data);
+    state.app = app;
+    state.loadedAt = Date.now();
+    cacheApp();
+    if (changed) {
+      recompute();
+      if (state.form || busy()) state.stale = true; // don't pull the page away mid-typing; shown when done
+      else renderKeepingPlace();
+    }
+    const pill = $('.sync-pill span');
+    if (pill) pill.textContent = loadedTime();
+  }
+
+  /** Someone is typing in the page, or has unsaved edits in it (e.g. a Settings table). */
+  function busy() {
+    const a = document.activeElement;
+    return state.viewEdited || !!(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== 'button');
+  }
+
+  /** Redraws the page in place: same scroll position, charts without their opening animation. */
+  function renderKeepingPlace() {
+    const y = window.scrollY;
+    state.quiet = true;
+    try {
+      render();
+    } finally {
+      state.quiet = false;
+    }
+    window.scrollTo(0, y);
+  }
+
+  let checking = false;
+  async function checkForUpdates() {
+    if (checking || loading || pendingSaves > 0 || document.hidden || !state.M) return;
+    checking = true;
+    try {
+      const ver = await call('dataVersion');
+      if (ver !== state.app.ver) await reload(true);
+      else {
+        state.loadedAt = Date.now(); // checked: nothing new
+        const pill = $('.sync-pill span');
+        if (pill) pill.textContent = loadedTime();
+        if (state.stale && !state.form && !busy()) renderKeepingPlace();
+      }
+    } catch (err) {
+      // Offline or asleep: try again next time.
+    }
+    checking = false;
   }
 
   window.__trackerReload = reload;
+  window.__trackerCheck = checkForUpdates; // the iPhone app calls this when a notification arrives
+  setInterval(checkForUpdates, 20000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdates(); });
+  window.addEventListener('online', checkForUpdates);
+  // Typing in the page (not the pop-up form) holds back background redraws until it's saved or left.
+  document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#view')) state.viewEdited = true; }, true);
 
   const defaultKind = () => (state.view === 'income' || state.view === 'super' ? 'income' : state.view === 'interest' ? 'interest'
     : state.view === 'balances' || state.view === 'accounts' ? 'adjustments' : 'expenses');
@@ -2351,7 +2441,7 @@
       refreshLocal();
       toast('✓ Marked as transferred');
       pendingSaves++;
-      call('markTransferred', ids).catch(err => { state.app.data.income = before; refreshLocal(); toast(errText(err), true); }).then(() => { pendingSaves--; });
+      call('markTransferred', ids).then(saveDone, err => { state.app.data.income = before; refreshLocal(); toast(errText(err), true); saveDone(null); });
     } else if (act === 'clear-all') {
       const typed = prompt('This deletes EVERY pay, expense, adjustment and interest entry. Settings and tax tables are kept.\n\nType DELETE to confirm.');
       if (typed === null) return;
@@ -2576,11 +2666,6 @@
     }
   });
 
-  // Pick up the other person's entries when the app comes back to the foreground.
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && state.M && Date.now() - state.loadedAt > 60000) reload(true);
-  });
-
   function settleUp() {
     const S = state.M.split;
     openForm('paybacks', { date: state.M.today, from: S.debtor, to: S.creditor, amount: E.round2(S.amount), note: 'Paid back' }, { isNew: true });
@@ -2626,5 +2711,7 @@
       throw err;
     }
     openFromLink(P);
+    // The iPhone app opens from the copy kept on the phone: check it's still the latest.
+    if (window.__PWA__) setTimeout(() => (BOOT.unsaved ? reload(true) : checkForUpdates()), 200);
   }
 })();

@@ -1,6 +1,6 @@
 // Keeps the app's files on the phone so it opens instantly (data always comes fresh from the API).
-const CACHE = 'zryc-1ec5094807';
-const FILES = ['./', 'index.html', 'app.js?v=1ec5094807', 'engine.js?v=1ec5094807', 'boot.js?v=1ec5094807', 'vendor/chart.umd.js', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-32.png'];
+const CACHE = 'zryc-1c51db30ef';
+const FILES = ['./', 'index.html', 'app.js?v=1c51db30ef', 'engine.js?v=1c51db30ef', 'boot.js?v=1c51db30ef', 'vendor/chart.umd.js', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-32.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
@@ -53,7 +53,7 @@ self.addEventListener('push', e => {
     .then(list => (list.length ? list : [FALLBACK]))
     .then(list => Promise.all(list.map(m => self.registration.showNotification(m.title, {
       body: m.body, tag: m.tag || undefined, data: { url: m.url || './' }, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png',
-    })))));
+    })).concat(self.clients.matchAll({ type: 'window' }).then(open => open.forEach(c => c.postMessage({ type: 'check' })))))));
 });
 
 self.addEventListener('notificationclick', e => {

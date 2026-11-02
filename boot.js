@@ -30,9 +30,11 @@
   }
 
   if ('serviceWorker' in navigator) {
-    // A notification was tapped while the app was open: show what it's about.
+    // From the service worker: a notification was tapped while the app was open (show what it's
+    // about), or one just arrived (something probably changed: check now).
     navigator.serviceWorker.addEventListener('message', function (e) {
       if (e.data && e.data.type === 'open' && window.__trackerOpen) window.__trackerOpen(e.data.url);
+      if (e.data && e.data.type === 'check' && window.__trackerCheck) window.__trackerCheck();
     });
     var hadController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js').catch(function () { /* app still works, just not cached */ });
@@ -48,11 +50,7 @@
 
   function api(fn, args) {
     return post({ token: store.get(TOKEN), fn: fn, args: args || [] }).then(function (body) {
-      if (body.ok) {
-        var r = body.result;
-        if (r && r.data && r.data.settings) store.set(CACHE, JSON.stringify(r)); // open instantly next time
-        return r;
-      }
+      if (body.ok) return body.result; // the app keeps the cached copy current (window.__trackerCache)
       if (body.code === 'UNPAIRED') {
         store.del(TOKEN);
         idbSet('token', null);
@@ -108,12 +106,14 @@
     var cached = null;
     try { cached = JSON.parse(store.get(CACHE) || 'null'); } catch (e) { cached = null; }
     if (cached) {
-      start(cached); // show what we had straight away, then refresh
-      setTimeout(function () { if (window.__trackerReload) window.__trackerReload(true); }, 200);
+      start(cached); // show what we had straight away; the app then checks for anything newer
       return;
     }
     message('<span class="e">⏳</span>Loading your data…');
-    api('getAppData').then(start).catch(function (err) {
+    api('getAppData').then(function (app) {
+      store.set(CACHE, JSON.stringify(app)); // open instantly next time
+      start(app);
+    }).catch(function (err) {
       message('<span class="e">📡</span>' + err.message + '<div style="margin-top:12px"><button class="btn primary" onclick="location.reload()">Try again</button></div>');
     });
   }
