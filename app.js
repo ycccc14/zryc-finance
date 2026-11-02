@@ -1268,6 +1268,7 @@
     state.after.push(renderImporter);
     state.after.push(() => renderTelegram(null));
     state.after.push(() => renderInstall(null));
+    if (!window.__PWA__) state.after.push(() => renderLog(null));
     return `
       <div class="section-title"><h1>Settings</h1></div>
       <section class="card"><div class="card-head"><h2>⚙️ General</h2></div>
@@ -1325,7 +1326,52 @@
         </div>
         <p class="muted small">Signed in as ${esc(state.app.user || 'unknown')}. Sample entries have IDs starting with "S-" and can be removed without touching your own entries.</p></section>
 
+      ${window.__PWA__ ? '' : '<section class="card" id="log-card"></section>'}
+
       <section class="card" id="importer"></section>`;
+  }
+
+  /** Activity log (Google web app only): every change, who made it and how. Loaded after the page draws. */
+  const LOG_ALERTS = ['Wrong pairing code', 'Blocked request', 'Edited in the Sheet', 'Sheet structure changed', 'Unknown Telegram chat'];
+  const LOG_ICONS = { Added: '➕', Changed: '✏️', Deleted: '🗑️', 'Settings changed': '⚙️', 'Phone paired': '📱', 'Phone removed': '📵', 'Pairing code created': '🔑' };
+
+  function renderLog(log) {
+    const el = $('#log-card');
+    if (!el) return;
+    const head = `<div class="card-head"><h2>🧾 Activity log</h2><button class="btn" data-act="log-refresh">↻ Refresh</button></div>`;
+    if (!log) {
+      el.innerHTML = head + '<p class="muted">Loading…</p>';
+      call('getActivityLog', 1000).then(renderLog).catch(err => { el.innerHTML = head + `<p class="flag">${esc(errText(err))}</p>`; });
+      return;
+    }
+    state.log = log;
+    state.logShow = 50;
+    el.innerHTML = head + `
+      ${log.ready ? '' : `<div class="notice small">The log switches on the next time the Sheet’s owner${log.owner ? ' (' + esc(log.owner) + ')' : ''} opens this web app or the iPhone app. Until then, changes are kept and written then.</div>`}
+      <p class="muted small" style="margin-top:0">Every add, change and delete, settings changes, phone pairing and edits made directly in the Sheet, newest first.
+        🔒 Only ${esc(log.owner || 'the Sheet’s owner')} can change the log${log.url ? ` (<a href="${esc(log.url)}" target="_blank" rel="noopener">tab in the Sheet</a>)` : ''}. Red rows need a look.</p>
+      <label class="field"><span>Search</span><input id="log-q" type="search" placeholder="e.g. Deleted, ZR, Grocery, Sheet" autocomplete="off" value="${esc(state.logQ || '')}"></label>
+      <div id="log-list"></div>`;
+    renderLogList();
+  }
+
+  function renderLogList() {
+    const el = $('#log-list');
+    if (!el || !state.log) return;
+    const q = (state.logQ || '').trim().toLowerCase();
+    const rows = state.log.rows.filter(r => !q || [r.who, r.via, r.action, r.tab, r.id, r.details].join(' ').toLowerCase().indexOf(q) >= 0);
+    const when = t => {
+      const d = new Date(t);
+      return isNaN(d) ? esc(t) : d.toLocaleString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+    };
+    el.innerHTML = (rows.length ? rows.slice(0, state.logShow).map(r => `<div class="log-row${LOG_ALERTS.indexOf(r.action) >= 0 ? ' alert' : ''}">
+        <div class="spread"><strong>${LOG_ICONS[r.action] || (LOG_ALERTS.indexOf(r.action) >= 0 ? '⚠️' : '•')} ${esc(r.action)}${r.tab ? ' <span class="muted">· ' + esc(r.tab) + '</span>' : ''}</strong>
+          <span class="muted small nowrap">${when(r.time)}</span></div>
+        ${r.details ? `<div class="small log-details">${esc(r.details)}</div>` : ''}
+        <div class="muted small">${esc(r.who)} · ${esc(r.via)}${r.id ? ' · ' + esc(r.id) : ''}${r.pending ? ' · <em>waiting to be written to the Sheet</em>' : ''}</div></div>`).join('')
+      : `<p class="muted small">${q ? 'Nothing matches “' + esc(q) + '”.' : 'Nothing logged yet.'}</p>`) +
+      (rows.length > state.logShow ? `<button class="btn block" data-act="log-more" style="margin-top:10px">Show more (${rows.length - state.logShow} older)</button>` : '') +
+      `<p class="muted small" style="margin-bottom:0">Showing the latest ${Math.min(state.logShow, rows.length)} of ${rows.length}${state.log.total > state.log.rows.length ? ' (the Sheet has ' + state.log.total + ' in all)' : ''}.</p>`;
   }
 
   /** Install on iPhone: pairing codes and paired phones (loaded after the page draws). */
@@ -2290,6 +2336,11 @@
           <span class="muted small">Type this into the app on the iPhone (valid ${r.expiresInMinutes} minutes, once):</span>
           <div style="font-size:34px;font-weight:800;letter-spacing:.12em;font-variant-numeric:tabular-nums">${esc(r.code)}</div></div>`;
       }).catch(err => { el.disabled = false; toast(errText(err), true); });
+    } else if (act === 'log-refresh') {
+      renderLog(null);
+    } else if (act === 'log-more') {
+      state.logShow += 50;
+      renderLogList();
     } else if (act === 'device-remove') {
       if (!confirm('Remove this phone? It will need a new pairing code to open the app again.')) return;
       el.disabled = true;
@@ -2480,6 +2531,7 @@
       if (e.target.id === 'calc-rate') { state.form.calc.rate = e.target.value; calcSync(); return; }
       if (e.target.name === 'amount') state.form.calc.expr = exprOf(e.target.value); // filled in some other way
     }
+    if (e.target.id === 'log-q') { state.logQ = e.target.value; state.logShow = 50; renderLogList(); return; }
     if (e.target.id === 'search') {
       state.q = e.target.value;
       $('#bills').innerHTML = billsHtml();
