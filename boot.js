@@ -16,7 +16,24 @@
   // The app saves changes in the background; keep the copy used for instant start-up current.
   window.__trackerCache = function (app) { store.set(CACHE, JSON.stringify(app)); };
 
+  // The service worker can't read localStorage, so it gets the device token (for fetching
+  // notifications) from IndexedDB.
+  function idbSet(key, value) {
+    try {
+      var open = indexedDB.open('zryc', 1);
+      open.onupgradeneeded = function () { open.result.createObjectStore('kv'); };
+      open.onsuccess = function () {
+        var kv = open.result.transaction('kv', 'readwrite').objectStore('kv');
+        if (value === null) kv.delete(key); else kv.put(value, key);
+      };
+    } catch (e) { /* no IndexedDB: notifications fall back to a generic message */ }
+  }
+
   if ('serviceWorker' in navigator) {
+    // A notification was tapped while the app was open: show what it's about.
+    navigator.serviceWorker.addEventListener('message', function (e) {
+      if (e.data && e.data.type === 'open' && window.__trackerOpen) window.__trackerOpen(e.data.url);
+    });
     var hadController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js').catch(function () { /* app still works, just not cached */ });
     // A new version was installed: reload once so it's used straight away.
@@ -38,6 +55,7 @@
       }
       if (body.code === 'UNPAIRED') {
         store.del(TOKEN);
+        idbSet('token', null);
         store.del(CACHE);
         showPairing(body.error);
       }
@@ -69,7 +87,10 @@
 
   function start(app) {
     window.__BOOT__ = app;
-    window.__PARAMS__ = {};
+    var params = {};
+    new URLSearchParams(location.search).forEach(function (v, k) { params[k] = v; }); // e.g. from a tapped notification
+    window.__PARAMS__ = params;
+    if (location.search) history.replaceState(null, '', location.pathname); // don't reopen the form on reload
     var s = document.createElement('script');
     s.src = 'app.js?v=' + window.__BUILD__;
     document.body.appendChild(s);
@@ -83,6 +104,7 @@
 
   function boot() {
     if (!store.get(TOKEN)) { showPairing(); return; }
+    idbSet('token', store.get(TOKEN));
     var cached = null;
     try { cached = JSON.parse(store.get(CACHE) || 'null'); } catch (e) { cached = null; }
     if (cached) {
@@ -128,6 +150,7 @@
         .then(function (body) {
           if (!body.ok) throw new Error(body.error);
           store.set(TOKEN, body.result.token);
+          idbSet('token', body.result.token);
           el.hidden = true;
           if (started) location.reload(); else boot();
         })

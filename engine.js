@@ -126,7 +126,6 @@ function TrackerEngine() {
       scale: isBlank(p.scale) ? 'Auto' : String(p.scale).trim(),
       colour: p.colour || '#888888',
       usualDays: isBlank(p.usualDays) ? 3 : num(p.usualDays),
-      telegram: isBlank(p.telegram) ? '' : String(p.telegram).trim(),
     }));
     const funds = (raw.funds || []).filter(f => !isBlank(f.name)).map(f => ({
       name: String(f.name).trim(),

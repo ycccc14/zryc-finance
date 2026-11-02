@@ -1031,7 +1031,7 @@
     const settledCard = settled.length ? `<section class="card"><details class="more"><summary>Settled earlier (${settled.length})</summary>
       <div class="tx-list" style="margin:6px -18px 0">${settled.map(row).join('')}</div></details></section>` : '';
     const tip = `<p class="muted small">Add an expense and choose <strong>Who paid?</strong> If ${esc(pName(M.codes[0]))} pays a Shared bill, ${esc(pName(M.codes[1]))} owes their share; if one of you pays something that’s entirely the other’s, they owe all of it.
-      The bill still counts in each person’s budget as usual. With Telegram on, the bot also reminds whoever owes on Tuesdays.</p>`;
+      The bill still counts in each person’s budget as usual. With phone notifications on, whoever owes also gets a reminder on Tuesdays.</p>`;
     return hero + add + openCard + settledCard + tip;
   }
 
@@ -1266,7 +1266,7 @@
     state.after.push(updateAllocTotals);
     state.after.push(renderTaxTables);
     state.after.push(renderImporter);
-    state.after.push(() => renderTelegram(null));
+    state.after.push(() => renderPush(null));
     state.after.push(() => renderInstall(null));
     if (!window.__PWA__) state.after.push(() => renderLog(null));
     return `
@@ -1283,7 +1283,7 @@
 
       <section class="card" id="install-card"></section>
 
-      <section class="card" id="tg-card"></section>
+      <section class="card" id="push-card"></section>
 
       <section class="card"><div class="card-head"><h2>👥 People</h2></div>
         ${grid('g-people', [
@@ -1293,8 +1293,7 @@
           { key: 'hoursPerDay', label: 'Hours/day', type: 'number' },
           { key: 'medicare', label: 'Medicare levy', type: 'select', options: ['Yes', 'No'] },
           { key: 'scale', label: 'Withholding scale', type: 'select', options: SCALES },
-          { key: 'colour', label: 'Colour', type: 'color' }, { key: 'usualDays', label: 'Usual days/week', type: 'number' },
-          { key: 'telegram', label: 'Telegram chat ID' }], people, 'Add person')}
+          { key: 'colour', label: 'Colour', type: 'color' }, { key: 'usualDays', label: 'Usual days/week', type: 'number' }], people, 'Add person')}
         <p class="muted small">"Auto" picks scale 2 for residents claiming the tax-free threshold, 1 if not, 3 for foreign residents, WHM for working holiday makers. Choose 5 for a full Medicare levy exemption. A new rate applies to pay entered from now on; each pay keeps the rate it was saved with.</p>
         ${saveBar('save-people', 'Save people')}</section>
 
@@ -1402,39 +1401,72 @@
       <p class="muted small" style="margin-bottom:0">🔒 Only paired phones can reach your data. Each code works once, for 30 minutes. Remove a phone here if it’s lost or replaced.</p>`;
   }
 
-  /** Telegram reminders card: status is loaded from the server after the page draws. */
-  function renderTelegram(status) {
-    const el = $('#tg-card');
+  /** Phone notifications card. Turning them on happens on the phone itself (the installed app). */
+  const pushSupported = () => !!(window.__PWA__ && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window);
+
+  function renderPush(status) {
+    const el = $('#push-card');
     if (!el) return;
+    const head = on => `<div class="card-head"><h2>🔔 Phone notifications</h2>${on === undefined ? '' : `<span class="tag ${on ? 'good' : ''}">${on ? 'On for this phone' : 'Off'}</span>`}</div>`;
     if (!status) {
-      el.innerHTML = '<div class="card-head"><h2>🔔 Telegram reminders</h2></div><p class="muted">Checking…</p>';
-      call('telegramStatus').then(renderTelegram).catch(err => { el.innerHTML = `<div class="card-head"><h2>🔔 Telegram reminders</h2></div><p class="flag">${esc(errText(err))}</p>`; });
+      el.innerHTML = head() + '<p class="muted">Checking…</p>';
+      call('pushStatus').then(renderPush).catch(err => { el.innerHTML = head() + `<p class="flag">${esc(errText(err))}</p>`; });
       return;
     }
-    const people = status.people.map(p => `<div class="spread" style="padding:6px 0;border-top:1px solid var(--line)">
-        <span class="row" style="gap:8px">${avatar(p.code)}<strong>${esc(p.name)}</strong><span class="tag ${p.linked ? 'good' : ''}">${p.linked ? '✓ linked' : 'not linked'}</span></span>
-        <span class="row" style="gap:6px">${status.connected ? `<button class="btn" data-act="tg-link" data-key="${esc(p.code)}">${p.linked ? 'Re-link' : 'Link'}</button>` : ''}
-          ${p.linked ? `<button class="btn link danger" data-act="tg-unlink" data-key="${esc(p.code)}">Unlink</button>` : ''}</span></div>
-        <div id="tg-link-${esc(p.code)}"></div>`).join('');
-    const bot = status.bot ? `<a href="https://t.me/${esc(status.bot)}" target="_blank" rel="noopener">@${esc(status.bot)}</a>` : 'your bot';
-    el.innerHTML = `
-      <div class="card-head"><h2>🔔 Telegram reminders</h2><span class="tag ${status.remindersOn ? 'good' : ''}">${status.remindersOn ? 'On' : 'Off'}</span></div>
-      <p class="small" style="margin:0 0 8px">Every <strong>Tuesday at 6 pm</strong> the bot asks each of you “Did you get paid?” with your usual days filled in, and records the pay when you tap ✅.
-        It then tells you exactly how much to move to Self Saving and Shared Saving, and reminds you each evening until you tap Done. On the 1st of each month it reminds you to record bank interest.</p>
-      <ol class="small" style="padding-left:20px;margin:0 0 10px;display:grid;gap:4px">
-        <li>In Telegram, open <strong>@BotFather</strong>, send <code>/newbot</code>, pick a name, and copy the token.</li>
-        <li>Paste the token below and press <strong>Save</strong>.${status.connected ? ` Connected to ${bot} ✓` : ''}</li>
-        <li>Press <strong>Turn on</strong>. Only one of you needs to.</li>
-        <li>Each of you presses <strong>Link</strong> below and opens the link on your own phone. Each link works once, for 24 hours.</li>
-      </ol>
-      <p class="small" style="margin:0 0 10px">🔒 <strong>Private:</strong> anyone can find a Telegram bot, but this one ignores every chat that isn’t linked here, so nobody else can see or record anything. If a chat you don’t recognise is linked, press <strong>Unlink</strong>.</p>
-      <div style="margin-bottom:10px">${people}</div>
-      <div class="row"><input id="tg-token" type="password" autocomplete="off" style="flex:1;min-width:0" placeholder="${status.hasToken ? 'Token saved. Paste a new one to replace it' : '123456789:ABC…'}" aria-label="Telegram bot token">
-        <button class="btn" data-act="tg-save">Save</button></div>
-      <div class="row" style="margin-top:10px">${status.remindersOn ? '<button class="btn" data-act="tg-off">Turn off</button>'
-        : `<button class="btn primary" data-act="tg-on"${status.connected ? '' : ' disabled'}>Turn on</button>`}
-        <button class="btn" data-act="tg-test"${status.connected ? '' : ' disabled'}>Send test message</button></div>
-      ${status.remindersOn ? `<p class="muted small" style="margin-bottom:0">Turned on by ${esc(status.onBy)}. After you tap a button in Telegram, the reply comes within about a minute.</p>` : ''}`;
+    const sch = status.schedule;
+    const who = c => (c === 'both' ? 'both of you' : pName(c));
+    const what = `<ul class="small" style="padding-left:20px;margin:0 0 10px;display:grid;gap:3px">
+        <li><strong>Tuesday ${sch.payHour - 12} pm</strong>: did you get paid? Tap to record it (your usual days are filled in).</li>
+        <li><strong>Daily ${sch.remindHour - 12} pm</strong>: pay still to move to Self Saving / Shared Saving, until you tap ✅ Done.</li>
+        <li><strong>1st of the month</strong>: record last month’s bank interest.</li>
+        <li><strong>Split bills</strong>: on Tuesdays, and when the other person taps <strong>Remind</strong>.</li></ul>`;
+    const phones = status.phones.length ? `<h3 style="margin-top:12px">Phones with notifications</h3>${status.phones.map(ph => `<div class="spread" style="padding:6px 0;border-top:1px solid var(--line)">
+        <span><strong>${esc(ph.name)}</strong>${ph.me ? ' <span class="tag good">this phone</span>' : ''}<div class="muted small">for ${esc(who(ph.person))}</div></span></div>`).join('')}` : '';
+    const personSelect = sel => `<label class="field"><span>Notify this phone about</span><select id="push-person">${state.M.codes.map(c => `<option value="${esc(c)}"${sel === c ? ' selected' : ''}>${esc(pName(c))}</option>`).join('')}
+        <option value="both"${sel === 'both' ? ' selected' : ''}>Both of us</option></select></label>`;
+    let body;
+    if (!window.__PWA__) {
+      body = `${what}<p class="small">Turn them on <strong>on each iPhone</strong>: open the <strong>ZR &amp; YC</strong> app from the Home Screen ▸ Me ▸ Settings ▸ Phone notifications.</p>
+        ${phones}<div class="row" style="margin-top:10px"><button class="btn" data-act="push-test"${status.phones.length ? '' : ' disabled'}>Send a test to every phone</button></div>`;
+    } else if (!pushSupported()) {
+      body = `${what}<p class="flag small">This phone can’t get notifications from the app. It needs iOS 16.4 or later, and the app must be opened from the Home Screen icon (not Safari).</p>${phones}`;
+    } else if (status.me) {
+      body = `${what}${personSelect(status.me.person)}
+        <div class="row" style="margin-top:10px"><button class="btn" data-act="push-on">Save</button><button class="btn" data-act="push-test">Send a test</button><button class="btn link danger" data-act="push-off">Turn off on this phone</button></div>${phones}`;
+    } else {
+      const denied = Notification.permission === 'denied';
+      body = `${what}${personSelect(state.M.codes[0])}
+        ${denied ? '<p class="flag small">Notifications are blocked for this app. Allow them in iPhone Settings ▸ Notifications ▸ ZR &amp; YC, then come back.</p>' : ''}
+        <button class="btn primary" data-act="push-on" style="margin-top:10px">🔔 Turn on for this phone</button>
+        <p class="muted small" style="margin-bottom:0">Your iPhone will ask to allow notifications: tap <strong>Allow</strong>.</p>${phones}`;
+    }
+    el.innerHTML = head(window.__PWA__ ? !!status.me : undefined) + body;
+  }
+
+  const b64Bytes = b64 => Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - b64.length % 4) % 4)), c => c.charCodeAt(0));
+  const bytesB64 = buf => btoa(String.fromCharCode.apply(null, new Uint8Array(buf))).replace(/[+]/g, '-').replace(/[/]/g, '_').replace(/=+$/, '');
+
+  /** Asks the phone for permission (this must start straight from the tap), subscribes and tells the server. */
+  async function pushTurnOn(person) {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') throw new Error('Notifications weren’t allowed. Allow them in iPhone Settings ▸ Notifications ▸ ZR & YC.');
+    const reg = await navigator.serviceWorker.ready;
+    const key = await call('pushPublicKey');
+    let sub = await reg.pushManager.getSubscription();
+    const subKey = sub && sub.options && sub.options.applicationServerKey;
+    if (sub && subKey && bytesB64(subKey) !== key) {
+      await sub.unsubscribe();
+      sub = null;
+    }
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64Bytes(key) });
+    return call('pushSubscribe', sub.toJSON(), person);
+  }
+
+  async function pushTurnOff() {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) await sub.unsubscribe();
+    return call('pushUnsubscribe');
   }
 
   function updateAllocTotals() {
@@ -2292,16 +2324,13 @@
     } else if (act === 'bill-tab') { state.billTab = key; render(); }
     else if (act === 'interest-record') openForm('interest', Object.assign(newRecord('interest'), { date: el.dataset.date }), { isNew: true });
     else if (act === 'interest-skip') { store.set('skip-interest-' + key, '1'); render(); }
-    else if (act === 'settle-up') {
-      const S = state.M.split;
-      openForm('paybacks', { date: state.M.today, from: S.debtor, to: S.creditor, amount: E.round2(S.amount), note: 'Paid back' }, { isNew: true });
-    } else if (act === 'split-add') {
+    else if (act === 'settle-up') settleUp(); else if (act === 'split-add') {
       const rec = newRecord(key === 'payback' ? 'paybacks' : 'expenses');
       if (key !== 'payback') rec.person = 'Shared';
       openForm(key === 'payback' ? 'paybacks' : 'expenses', rec, { isNew: true });
     } else if (act === 'split-remind') {
       el.disabled = true;
-      call('telegramRemindDebt').then(() => { el.disabled = false; toast('🔔 Reminder sent to ' + pName(state.M.split.debtor) + ' on Telegram'); })
+      call('remindDebt').then(() => { el.disabled = false; toast('🔔 Reminder sent to ' + pName(state.M.split.debtor) + '’s phone'); })
         .catch(err => { el.disabled = false; toast(errText(err), true); });
     }
     else if (act === 'paycheck-record' || act === 'paycheck-change') {
@@ -2350,23 +2379,16 @@
       store.set('last-me', 'settings');
       render();
       setTimeout(() => { const c = $('#install-card'); if (c) c.scrollIntoView({ behavior: 'smooth' }); }, 300);
-    } else if (act === 'tg-link') {
+    } else if (act === 'push-on') {
       el.disabled = true;
-      call('telegramLinkCode', key).then(link => {
-        el.disabled = false;
-        $('#tg-link-' + key).innerHTML = `<div class="receipt" style="margin:4px 0 8px"><a class="btn primary" href="${esc(link.url)}" target="_blank" rel="noopener">Open Telegram to link ${esc(link.name)} →</a>
-          <span class="muted small">Open this on ${esc(link.name)}’s phone, then tap <strong>Start</strong>. Or send the bot: <code>${esc(link.command)}</code></span></div>`;
-      }).catch(err => { el.disabled = false; toast(errText(err), true); });
-    } else if (act === 'tg-unlink') {
-      if (!confirm('Unlink ' + pName(key) + '’s Telegram chat? Reminders for ' + pName(key) + ' stop until you link again.')) return;
+      pushTurnOn($('#push-person').value).then(st => { renderPush(st); toast('🔔 Notifications on'); })
+        .catch(err => { el.disabled = false; toast(errText(err), true); });
+    } else if (act === 'push-off') {
       el.disabled = true;
-      call('telegramUnlink', key).then(st => { renderTelegram(st); toast('Unlinked'); }).catch(err => { el.disabled = false; toast(errText(err), true); });
-    } else if (act === 'tg-save' || act === 'tg-on' || act === 'tg-off' || act === 'tg-test') {
-      const fn = { 'tg-save': 'saveTelegramToken', 'tg-on': 'telegramEnable', 'tg-off': 'telegramDisable', 'tg-test': 'telegramTest' }[act];
-      const msg = { 'tg-save': '✓ Bot connected', 'tg-on': '🔔 Reminders on', 'tg-off': 'Reminders off', 'tg-test': '✓ Test message sent' }[act];
+      pushTurnOff().then(st => { renderPush(st); toast('Notifications off'); }).catch(err => { el.disabled = false; toast(errText(err), true); });
+    } else if (act === 'push-test') {
       el.disabled = true;
-      call.apply(null, [fn].concat(act === 'tg-save' ? [$('#tg-token').value] : []))
-        .then(st => { renderTelegram(st); toast(msg); })
+      call('pushTest').then(r => { el.disabled = false; toast('✓ Test sent to ' + r.sent + (r.sent === 1 ? ' phone' : ' phones')); })
         .catch(err => { el.disabled = false; toast(errText(err), true); });
     }
     else if (act === 'go-import') {
@@ -2559,6 +2581,34 @@
     if (!document.hidden && state.M && Date.now() - state.loadedAt > 60000) reload(true);
   });
 
+  function settleUp() {
+    const S = state.M.split;
+    openForm('paybacks', { date: state.M.today, from: S.debtor, to: S.creditor, amount: E.round2(S.amount), note: 'Paid back' }, { isNew: true });
+  }
+
+  /** Forms a link (or a tapped notification) asks for: ?add=pay&person=…&date=…&days=…, ?add=interest, ?settle=1. */
+  function openFromLink(P) {
+    if (P.add === 'pay') {
+      const rec = newRecord('income', { person: P.person, date: /^\d{4}-\d{2}-\d{2}$/.test(P.date || '') ? P.date : '' });
+      if (P.days) rec.days = Number(P.days);
+      openForm('income', rec, { isNew: true });
+    } else if (P.add === 'interest') {
+      openForm('interest', newRecord('interest'), { isNew: true });
+    } else if (P.settle && state.M.split.amount >= 0.01) {
+      settleUp();
+    }
+  }
+
+  /** A notification was tapped while the app was already open (the service worker passes its link on). */
+  window.__trackerOpen = url => {
+    const P = {};
+    new URL(url, location.href).searchParams.forEach((v, k) => { P[k] = v; });
+    if (P.page && VIEWS.some(v => v[0] === P.page)) state.view = P.page;
+    if (state.form) closeModal();
+    render();
+    openFromLink(P);
+  };
+
   // ---------- start ----------
 
   if (BOOT.error || !BOOT.data) {
@@ -2575,10 +2625,6 @@
         <p class="muted small">${esc(err && err.stack || err)}</p><button class="btn primary" onclick="location.reload()">Try again</button></section>`;
       throw err;
     }
-    if (P.add === 'pay') {
-      const rec = newRecord('income', { person: P.person, date: /^\d{4}-\d{2}-\d{2}$/.test(P.date || '') ? P.date : '' });
-      if (P.days) rec.days = Number(P.days);
-      openForm('income', rec, { isNew: true });
-    }
+    openFromLink(P);
   }
 })();
