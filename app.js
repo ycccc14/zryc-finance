@@ -30,15 +30,16 @@
   // Bank accounts: icon + colour (colour-blind-safe order, same as the first fund colours).
   const ACCOUNT_STYLE = { 'Everyday Account': ['💳', '#2A78D6'], 'Self Saving': ['🏦', '#1BAF7A'], 'Shared Saving': ['🤝', '#EDA100'] };
   const ACCOUNT_COLOURS = ['#2A78D6', '#1BAF7A', '#EDA100', '#E87BA4', '#008300'];
-  // Wallet page: [country, currency, flag, name], and quick picks [name, card colour, badge].
+  // Wallet page: [country, currency, flag, name], and quick picks [name, card colour, badge, logo in assets/logos].
   const WALLET_PLACES = [['AU', 'AUD', '🇦🇺', 'Australia'], ['MY', 'MYR', '🇲🇾', 'Malaysia']];
   const WALLET_COLOUR = '#475569';
   const WALLET_BRANDS = {
-    AU: [['CommBank', '#FFCC00', 'CBA'], ['NAB', '#C8102E', 'NAB'], ['Westpac', '#D5002B', 'W'], ['ANZ', '#007DBA', 'ANZ'], ['ING', '#FF6200', 'ING'], ['Macquarie', '#1A1A1A', 'M'],
-      ['Bankwest', '#F7B500', 'BW'], ['St.George', '#78BE20', 'SG'], ['Up', '#FF7A64', 'Up'], ['Wise', '#9FE870', 'W'], ['Revolut', '#191C1F', 'R'], ['PayPal', '#003087', 'PP']],
-    MY: [['Maybank', '#FFC83D', 'MB'], ['CIMB', '#D7141A', 'C'], ['Public Bank', '#C8102E', 'PB'], ['RHB', '#005DAA', 'RHB'], ['Hong Leong', '#003A79', 'HL'], ['AmBank', '#E31837', 'Am'],
-      ['GXBank', '#5B2DE1', 'GX'], ['Touch ’n Go eWallet', '#005BAA', 'TNG'], ['GrabPay', '#00B14F', 'G'], ['ShopeePay', '#EE4D2D', 'S'], ['Boost', '#E1251B', 'B'],
-      ['ASB', '#C8102E', 'ASB'], ['EPF (KWSP)', '#003D7D', 'EPF'], ['Tabung Haji', '#00703C', 'TH']],
+    AU: [['CommBank', '#FFCC00', 'CBA', 'commbank'], ['NAB', '#C8102E', 'NAB', 'nab'], ['Westpac', '#D5002B', 'W', 'westpac'], ['ANZ', '#007DBA', 'ANZ', 'anz'], ['ING', '#FF6200', 'ING', 'ing'],
+      ['Macquarie', '#1A1A1A', 'M', 'macquarie'], ['Bankwest', '#F7B500', 'BW', 'bankwest'], ['St.George', '#78BE20', 'SG', 'stgeorge'], ['Up', '#FF7A64', 'Up', 'up'], ['Wise', '#9FE870', 'W', 'wise'],
+      ['Revolut', '#191C1F', 'R', 'revolut'], ['PayPal', '#003087', 'PP', 'paypal'], ['Afterpay', '#B2FCE4', 'AP', 'afterpay']],
+    MY: [['Maybank', '#FFC83D', 'MB', 'maybank'], ['CIMB', '#D7141A', 'C', 'cimb'], ['Public Bank', '#C8102E', 'PB', 'pbb'], ['RHB', '#005DAA', 'RHB', 'rhb'], ['Hong Leong', '#003A79', 'HL', 'hlb'],
+      ['AmBank', '#E31837', 'Am', 'ambank'], ['GXBank', '#5B2DE1', 'GX', 'gxbank'], ['Touch ’n Go eWallet', '#005BAA', 'TNG', 'tng'], ['GrabPay', '#00B14F', 'G', 'grab'], ['ShopeePay', '#EE4D2D', 'S', 'shopee'],
+      ['Boost', '#E1251B', 'B', 'boost'], ['ASB', '#C8102E', 'ASB', 'asb'], ['EPF (KWSP)', '#003D7D', 'EPF', 'kwsp'], ['Tabung Haji', '#00703C', 'TH', 'th'], ['Atome', '#F0FF5F', 'At', 'atome']],
   };
 
   // Stroke icons (24×24).
@@ -929,7 +930,10 @@
   const wSigned = (n, cur) => (n > 0.004 ? '+' : '') + wMoney(n, cur);
   const wPlace = cur => WALLET_PLACES.find(p => p[1] === cur);
   const rateText = r => '1 AUD = ' + +Number(r).toFixed(4) + ' MYR';
-  const wVisible = w => state.person === 'All' || w.owner === state.person || w.owner === 'Shared';
+  /** Logos live with the iPhone app on GitHub Pages; the Google web app loads them from there. */
+  const logoBase = () => (window.__PWA__ ? 'logos/' : (state.app.pwaUrl || '../assets/') + 'logos/');
+  const brandOf = name => WALLET_BRANDS.AU.concat(WALLET_BRANDS.MY).find(b => String(name) === b[0] || String(name).indexOf(b[0] + ' ') === 0);
+  const wLogo = w => w.logo || (brandOf(w.name) || [])[3] || '';
 
   /** Dark text on light card colours (e.g. Maybank yellow), white on the rest. */
   function wInk(hex) {
@@ -941,9 +945,10 @@
     const c = w.colour || WALLET_COLOUR;
     const t = E.WALLET_TYPES[w.type];
     const open = preview ? '' : `role="button" tabindex="0" data-act="wallet-open" data-key="${esc(w.id)}"`;
+    const logo = wLogo(w);
     return `<div class="wcard" style="--c:${esc(c)};--wi:${wInk(c)}" ${open}>
-      <div class="wtop"><span class="wbadge">${esc(w.badge || t.emoji)}</span>
-        <span class="wmain"><span class="wname">${esc(w.name)}</span><span class="wkind">${esc(t.label)}${w.checked ? ' · as of ' + dayMonth(w.checked) : ''}</span></span>
+      <div class="wtop"><span class="wbadge">${esc(w.badge || t.emoji)}${logo ? `<img src="${esc(logoBase() + logo)}.png" alt="" onerror="this.remove()">` : ''}</span>
+        <span class="wmain"><span class="wname">${esc(w.name)}</span><span class="wkind">${w.linked ? 'Follows your Savings' : esc(t.label)}${w.checked ? ' · as of ' + dayMonth(w.checked) : ''}</span></span>
         <span class="wbal">${w.debt ? '<small>You owe</small>' : ''}${wMoney(w.shown, w.currency)}</span></div>
       <div class="wbottom"><span>${w.number ? '•••• ' + esc(w.number) : ''}</span><span class="wtag">${esc(pName(w.owner))}</span></div></div>`;
   }
@@ -952,19 +957,26 @@
   const transferSub = t => [t.cross ? 'rate ' + +t.rate.toFixed(4) : '', t.fee ? 'fee ' + wMoney(t.fee, t.from.currency) : '', esc(t.note)].filter(Boolean).join(' · ');
 
   function viewWallet() {
+    const M = state.M;
+    if (!M.viewer) {
+      return `<section class="card">${empty('🔐', `<strong>Whose ${window.__PWA__ ? 'phone' : 'account'} is this?</strong><br>Your wallet is private, so the app needs to know. You can only choose once.`)}
+        <div class="two">${M.codes.map(c => `<button class="btn primary" data-act="wallet-claim" data-key="${esc(c)}">${esc(pName(c))}</button>`).join('')}</div></section>`;
+    }
+    if (state.person !== 'All' && state.person !== M.viewer) {
+      return `<section class="card">${empty('🔒', `<strong>${esc(pName(state.person))}’s wallet is private</strong><br>Only ${esc(pName(state.person))} can see it.`)}</section>`;
+    }
     const w = wOf(state.walletId);
     return w ? walletDetail(w) : walletHome();
   }
 
   function walletHome() {
     const M = state.M;
-    const sel = state.person;
-    const T = M.walletTotals[sel];
-    const mine = M.wallets.filter(wVisible);
+    const T = M.walletTotals.All; // the server only sends this person's accounts and shared ones
+    const mine = M.wallets;
     const closed = mine.filter(w => w.closed);
     const stats = [['🇦🇺 Australia', money(T.aud)], ['🇲🇾 Malaysia', myr(T.myr)]].concat(T.debts > 0.004 ? [['↘ Debts', money(T.debts)]] : []);
     const hero = `<section class="hero">
-      <div class="label">${sel === 'All' ? 'Our net worth' : esc(pName(sel)) + '’s accounts + shared'}</div>
+      <div class="label">${esc(pName(M.viewer))}’s accounts + shared</div>
       <div class="big${neg(T.net)}">${money(T.net)}</div>
       <div class="myr">≈ ${myr(T.netMYR)} at ${rateText(M.general.exchangeRate)}</div>
       <div class="hero-stats" style="grid-template-columns:repeat(${stats.length}, minmax(0, 1fr))">${stats.map(([k, v]) => `<div class="hero-stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('')}</div></section>`;
@@ -978,7 +990,7 @@
         <button class="btn link" data-act="wallet-new" data-key="${cur}">＋ Add ${country === 'MY' ? 'a Malaysian' : 'an Australian'} account</button></div>`;
     };
 
-    const moves = M.walletTransfers.filter(t => wVisible(t.from) || wVisible(t.to)).slice().reverse().slice(0, 30).map(t => ({
+    const moves = M.walletTransfers.slice().reverse().slice(0, 30).map(t => ({
       date: t.date, kind: 'walletTransfers', id: t.id, icon: tile(t.cross ? '💱' : '🔁', '#64748B', 'round'), value: 0,
       title: `${esc(t.from.name)} → ${esc(t.to.name)}`, sub: transferSub(t), amt: wMoney(t.left, t.from.currency), small: '→ ' + wMoney(t.received, t.to.currency),
     }));
@@ -994,7 +1006,7 @@
       <div class="cols">${WALLET_PLACES.map(section).join('')}</div>
       ${closed.length ? `<details class="more"><summary>Closed accounts (${closed.length})</summary><div class="wstack" style="margin-top:10px">${closed.map(w => walletCard(w)).join('')}</div></details>` : ''}
       ${transfers}
-      <p class="muted small" style="margin:0 2px">These are the real balances you record, so they don’t change your budget funds, and transfer fees don’t count as spending. Tap an account to update its balance.</p>`;
+      <p class="muted small" style="margin:0 2px">🔒 Only you can see this page. Your Everyday, Self Saving and Shared Saving balances come from Savings ▸ Accounts; any other account shows the balance you record. Transfer fees are saved as expenses.</p>`;
   }
 
   function walletDetail(w) {
@@ -1005,6 +1017,10 @@
     const flip = v => (w.debt ? -v : v);
     const rows = w.events.filter(e => e.month === m).slice().reverse().map(e => {
       const t = e.transfer;
+      if (e.title) {
+        return { date: e.date, kind: e.kind, id: e.id, icon: tile({ income: '💼', expenses: '🧾', interest: '🏦' }[e.kind] || '🔁', '#64748B', 'round'), value: 0, title: esc(e.title), sub: esc(e.note),
+          amt: `<span class="${e.change > 0 ? 'pos' : ''}">${wSigned(e.change, cur)}</span>`, small: wMoney(e.balance, cur) };
+      }
       if (!t) {
         return { date: e.date, kind: e.kind, id: e.id, icon: tile('⚖️', '#64748B', 'round'), value: 0, title: 'Balance updated', sub: esc(e.note),
           amt: wMoney(flip(e.balance), cur), small: Math.abs(e.change) > 0.004 ? wSigned(flip(e.change), cur) : 'no change' };
@@ -1013,7 +1029,7 @@
       return { date: e.date, kind: e.kind, id: e.id, icon: tile(t.cross ? '💱' : '🔁', '#64748B', 'round'), value: 0, title: (out ? 'To ' : 'From ') + esc(out ? t.to.name : t.from.name),
         sub: transferSub(t), amt: `<span class="${out ? '' : 'pos'}">${wSigned(e.change, cur)}</span>`, small: wMoney(flip(e.balance), cur) };
     });
-    if (w.date && E.monthOf(w.date) === m) {
+    if (!w.linked && w.date && E.monthOf(w.date) === m) {
       rows.push({ date: w.date, kind: 'wallets', id: w.id, icon: tile('🏁', '#64748B', 'round'), value: 0, title: 'Starting balance', sub: '', amt: wMoney(w.opening, cur), small: '' });
     }
     rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
@@ -1032,10 +1048,10 @@
     }
     return `
       <div class="section-title"><button class="icon-btn wback" data-act="wallet-back" aria-label="Back to Wallet" style="flex:none">‹</button><h1 class="wtitle">${esc(w.name)}</h1>
-        <button class="icon-btn" data-act="edit" data-kind="wallets" data-id="${esc(w.id)}" aria-label="Edit account" style="flex:none">✏️</button></div>
+        <button class="icon-btn" data-act="wallet-edit" data-key="${esc(w.id)}" aria-label="Edit account" style="flex:none">✏️</button></div>
       <div class="wsolo">${walletCard(w, true)}</div>
       ${w.closed ? '<div class="notice">This account is closed, so it isn’t counted in your totals.</div>' : ''}
-      <div class="two wactions"><button class="btn" data-act="wallet-transfer" data-key="${esc(w.id)}">🔁 Transfer</button><button class="btn" data-act="wallet-update" data-key="${esc(w.id)}">⚖️ Update balance</button></div>
+      <div class="two wactions"><button class="btn" data-act="wallet-transfer" data-key="${esc(w.id)}">🔁 Transfer</button><button class="btn" data-act="wallet-update" data-key="${esc(w.id)}">⚖️ ${w.linked ? 'Fix balance' : 'Update balance'}</button></div>
       <div style="text-align:center">${monthNav()}</div>
       <div class="stats">${stat('Money in', wMoney(W.in, cur))}${stat('Money out', wMoney(W.out, cur))}</div>
       <section class="card"><div class="card-head"><h2>${w.debt ? 'Owed' : 'Balance'} in ${MONTHS[+m.slice(5, 7) - 1]}</h2></div>
@@ -1840,14 +1856,14 @@
       return { date, from: code, to: M.codes.find(c => c !== code) || code, amount: '', note: '' };
     }
     if (kind === 'wallets') {
-      return { date, name: '', currency: (keep && keep.currency) || 'AUD', type: '', owner: state.person !== 'All' ? state.person : 'Shared', number: '', opening: '', colour: WALLET_COLOUR, badge: '', note: '', closed: '' };
+      return { date, name: '', currency: (keep && keep.currency) || 'AUD', type: '', owner: M.viewer, number: '', opening: '', colour: WALLET_COLOUR, badge: '', logo: '', note: '', closed: '' };
     }
-    if (kind === 'walletChecks') return { date, walletId: keep.walletId, amount: '', note: '' };
+    if (kind === 'walletChecks') return { date, walletId: keep.walletId, amount: '', note: '', fund: fundsIn(wOf(keep.walletId).linked)[0] || '' };
     if (kind === 'walletTransfers') {
       const open = M.wallets.filter(w => !w.closed);
       const from = open.find(w => w.id === (keep && keep.fromId)) || open.find(w => w.currency === 'AUD') || open[0];
       const to = open.find(w => w !== from && w.currency !== from.currency) || open.find(w => w !== from);
-      return { date, fromId: from.id, toId: to.id, amount: '', fee: '', feeIn: '', rate: M.general.exchangeRate, received: '', note: '' };
+      return transferFunds({ date, fromId: from.id, toId: to.id, amount: '', fee: '', feeIn: '', rate: M.general.exchangeRate, received: '', note: '', person: M.viewer, fromFund: '', toFund: '' });
     }
     if (kind === 'interest') {
       const acct = interestAccounts().indexOf('Self Saving') >= 0 ? 'Self Saving' : interestAccounts()[0] || M.accounts[0];
@@ -1907,7 +1923,11 @@
   }
 
   function editEntry(kind, id) {
+    // A transfer's fee expense and fund adjustment are changed through the transfer.
+    const parent = /^[AE]-wt-(.+)$/.exec(String(id));
+    if (parent) { kind = 'walletTransfers'; id = parent[1]; }
     const rec = (state.app.data[kind] || []).find(r => String(r.id) === String(id));
+    if (kind === 'walletTransfers' && (!rec || !wOf(rec.fromId) || !wOf(rec.toId))) { toast('This is part of a private wallet transfer.', true); return; }
     if (rec) openForm(kind, rec);
   }
 
@@ -1924,6 +1944,18 @@
   /** Any fund, grouped by bank account, with a first "default" choice. */
   const fundSelect = (name, value, defaultLabel) => `<select name="${name}"><option value="">${esc(defaultLabel)}</option>${state.M.accounts.map(a =>
     `<optgroup label="${esc(aIcon(a))} ${esc(a)}">${fundsIn(a).map(f => `<option value="${esc(f)}"${f === value ? ' selected' : ''}>${esc(fIcon(f))} ${esc(f)}</option>`).join('')}</optgroup>`).join('')}</select>`;
+
+  /** The funds in one bank account. */
+  const accountFunds = (name, value, account) => `<select name="${name}">${fundsIn(account).map(f => `<option value="${esc(f)}"${f === value ? ' selected' : ''}>${esc(fIcon(f))} ${esc(f)}</option>`).join('')}</select>`;
+
+  /** Keeps a transfer's funds inside the accounts it uses. */
+  function transferFunds(r) {
+    const from = wOf(r.fromId);
+    const to = wOf(r.toId);
+    if (from.linked && fundsIn(from.linked).indexOf(r.fromFund) < 0) r.fromFund = fundsIn(from.linked)[0] || '';
+    r.toFund = !to.linked ? '' : fundsIn(to.linked).indexOf(r.toFund) >= 0 ? r.toFund : fundsIn(to.linked)[0] || '';
+    return r;
+  }
 
   // ---------- calculator keypad ----------
 
@@ -2117,25 +2149,28 @@
       const saved = wOf(r.id);
       const place = wPlace(r.currency);
       const brands = ['cash', 'lent', 'borrowed'].indexOf(r.type) < 0 ? WALLET_BRANDS[place[0]] : [];
+      const link = saved && saved.linked;
       body = `
-        ${saved && saved.events.length ? `<div class="kv"><span class="muted">Country</span><span>${place[2]} ${place[3]} (${place[1]})</span></div>`
+        ${link || (saved && saved.events.length) ? `<div class="kv"><span class="muted">Country</span><span>${place[2]} ${place[3]} (${place[1]})</span></div>`
           : `<div class="seg" role="group" aria-label="Country">${WALLET_PLACES.map(p => `<button type="button" data-act="wallet-cur" data-key="${p[1]}" aria-pressed="${r.currency === p[1]}">${p[2]} ${p[3]}</button>`).join('')}</div>`}
         ${brands.length ? `<div class="field"><span>Quick pick</span><div class="scroller">${brands.map(([name, colour]) =>
-          `<button type="button" class="filter-chip" data-act="wallet-brand" data-key="${esc(name)}" aria-pressed="${r.name === name}"><span class="dot" style="--c:${colour}"></span>${esc(name)}</button>`).join('')}</div></div>` : ''}
+          `<button type="button" class="filter-chip" data-act="wallet-brand" data-key="${esc(name)}" aria-pressed="${wLogo(r) === (brandOf(name) || [])[3]}"><span class="dot" style="--c:${colour}"></span>${esc(name)}</button>`).join('')}</div></div>` : ''}
         ${field('Name', 'name', r.name, 'type="text" maxlength="40" placeholder="e.g. CommBank Everyday"')}
-        <div class="field"><span>Whose account?</span><input type="hidden" name="owner" value="${esc(r.owner)}">${who(r.owner, people.concat([['Shared', 'Shared']]), 'form-owner')}</div>
+        <input type="hidden" name="owner" value="${esc(r.owner)}">
+        ${link ? '' : `<div class="field"><span>Whose account?</span>${who(r.owner, [[M.viewer, pName(M.viewer)], ['Shared', 'Shared']], 'form-owner')}</div>
         <div class="two">${field(`${saved ? 'Starting balance' : t.debt ? 'You owe now' : 'Balance now'} (${r.currency})`, 'opening', r.opening, 'type="number" step="0.01" inputmode="decimal" placeholder="0.00"')}
-          ${field('Balance as of', 'date', r.date, 'type="date" required')}</div>
+          ${field('Balance as of', 'date', r.date, 'type="date" required')}</div>`}
         <div class="two">${field('Last 4 digits (optional)', 'number', r.number, 'type="text" inputmode="numeric" maxlength="4"')}
           ${field('Card colour', 'colour', r.colour || WALLET_COLOUR, 'type="color"')}</div>
-        <input type="hidden" name="badge" value="${esc(r.badge)}">
+        <input type="hidden" name="badge" value="${esc(r.badge)}"><input type="hidden" name="logo" value="${esc(r.logo)}">
         ${field('Note', 'note', r.note, 'type="text" placeholder="Optional"')}
-        ${saved ? `<label class="field"><span>Status</span><select name="closed"><option value="">Open</option><option value="Yes"${r.closed === 'Yes' ? ' selected' : ''}>Closed (left out of the totals)</option></select></label>` : ''}`;
+        ${saved && !link ? `<label class="field"><span>Status</span><select name="closed"><option value="">Open</option><option value="Yes"${r.closed === 'Yes' ? ' selected' : ''}>Closed (left out of the totals)</option></select></label>` : ''}`;
     } else if (F.kind === 'walletChecks') {
       const w = wOf(r.walletId);
       body = `
         <div class="muted">${wPlace(w.currency)[2]} ${esc(w.name)} · ${w.debt ? 'how much do you owe now?' : 'how much is in it now?'}</div>
         ${keypad(false)}
+        ${w.linked ? `<label class="field"><span>Put the difference in fund</span>${accountFunds('fund', r.fund, w.linked)}</label>` : ''}
         <div class="two">${field('Date', 'date', r.date, 'type="date" required')}
           ${field('Note', 'note', r.note, 'type="text" placeholder="Optional"')}</div>`;
     } else if (F.kind === 'walletTransfers') {
@@ -2147,6 +2182,8 @@
         return list.length ? `<optgroup label="${p[2]} ${p[3]}">${list.map(w => `<option value="${esc(w.id)}"${w.id === value ? ' selected' : ''}>${esc(w.name)}</option>`).join('')}</optgroup>` : '';
       }).join('')}</select>`;
       const feeIn = r.feeIn === 'Yes' ? 'Yes' : '';
+      const funds = [from.linked ? `<label class="field"><span>Taken from fund</span>${accountFunds('fromFund', r.fromFund, from.linked)}</label>` : `<label class="field"><span>Fee comes out of</span>${fundSelect('fromFund', r.fromFund, 'Living Expenses')}</label>`,
+        to.linked ? `<label class="field"><span>Goes into fund</span>${accountFunds('toFund', r.toFund, to.linked)}</label>` : ''].filter(Boolean);
       body = `
         <div class="wroute"><label class="field"><span>From</span>${pick('fromId', r.fromId)}</label>
           <button type="button" class="icon-btn" data-act="wt-swap" aria-label="Swap From and To">${ico('split', 18)}</button>
@@ -2157,6 +2194,7 @@
           <div class="field"><span>Fee is</span><input type="hidden" name="feeIn" value="${feeIn}"><div class="seg" role="group" aria-label="How the fee is charged">${[['', 'On top'], ['Yes', 'Included']].map(([k, l]) =>
             `<button type="button" data-act="wt-feein" data-key="${k}" aria-pressed="${feeIn === k}">${l}</button>`).join('')}</div></div></div>
         ${cross ? field(`Amount received (${to.currency})`, 'received', r.received, 'type="number" step="0.01" min="0" inputmode="decimal"') : ''}
+        <div class="${funds.length > 1 ? 'two' : ''}">${funds.join('')}</div>
         <div class="two">${field('Date', 'date', r.date, 'type="date" required')}
           ${field('Note', 'note', r.note, 'type="text" placeholder="e.g. Wise, sent home"')}</div>`;
     } else if (F.kind === 'interest') {
@@ -2189,6 +2227,7 @@
     }
     const walletTitle = { wallets: 'New account', walletChecks: 'Update balance', walletTransfers: 'Transfer' }[F.kind];
     const picking = F.kind === 'wallets' && !r.type; // choosing the kind of account: nothing to save yet
+    const keepAccount = F.kind === 'wallets' && (wOf(r.id) || {}).linked; // the three bank accounts can't be deleted
     const kindSwitch = F.kind === 'paybacks'
       ? `<h2 id="form-title">💸 ${F.isNew ? 'Payback / lend' : 'Edit payback'}</h2>`
       : walletTitle && F.isNew ? `<h2 id="form-title">${walletTitle}</h2>`
@@ -2202,7 +2241,7 @@
         <form class="form" id="entry-form" onsubmit="return false">${body}
           ${picking ? '' : `<div class="${F.kind === 'wallets' ? '' : 'receipt'}" id="form-preview"></div>
           <div class="sheet-actions">
-            ${F.isNew ? '' : '<button type="button" class="btn danger" data-act="form-delete">Delete</button>'}
+            ${F.isNew || keepAccount ? '' : '<button type="button" class="btn danger" data-act="form-delete">Delete</button>'}
             ${F.isNew && F.kind === 'expenses' ? '<button type="button" class="btn" data-act="form-save-more">Save &amp; add another</button>' : ''}
             <button type="submit" class="btn primary grow" data-act="form-save">Save</button></div>`}
         </form></div>`;
@@ -2273,14 +2312,17 @@
         '<span class="muted small">Paybacks don’t change budgets or fund balances: each person’s share was already counted when the bill was added.</span>';
     } else if (F.kind === 'wallets') {
       const debt = !!E.WALLET_TYPES[r.type].debt;
-      el.innerHTML = walletCard({ id: '', name: r.name || 'Account name', type: r.type, currency: r.currency, debt, owner: r.owner, colour: r.colour, badge: r.badge, number: r.number, shown: Number(r.opening) || 0 }, true);
+      const saved = wOf(r.id);
+      el.innerHTML = walletCard({ id: '', name: r.name || 'Account name', type: r.type, currency: r.currency, debt, owner: r.owner, colour: r.colour, badge: r.badge, logo: r.logo, number: r.number,
+        linked: saved && saved.linked, shown: saved && saved.linked ? saved.shown : Number(r.opening) || 0 }, true);
     } else if (F.kind === 'walletChecks') {
       const w = wOf(r.walletId);
       const saved = w.events.find(e => e.id === r.id);
       const was = saved ? saved.balance - saved.change : w.balance;
       const now = w.debt ? -(Number(r.amount) || 0) : Number(r.amount) || 0;
       const flip = v => (w.debt ? -v : v);
-      el.innerHTML = line('Was', wMoney(flip(was), w.currency)) + line('Now', `<strong>${wMoney(flip(now), w.currency)}</strong>`) + line('Difference', wSigned(flip(now - was), w.currency));
+      el.innerHTML = line('Was', wMoney(flip(was), w.currency)) + line('Now', `<strong>${wMoney(flip(now), w.currency)}</strong>`) + line('Difference', wSigned(flip(now - was), w.currency)) +
+        (w.linked ? '<span class="muted small">The difference is saved as an adjustment, so Savings ▸ Accounts matches too.</span>' : '');
     } else if (F.kind === 'walletTransfers') {
       const from = wOf(r.fromId);
       const to = wOf(r.toId);
@@ -2293,7 +2335,7 @@
         (x.cross ? line('Converted', `${wMoney(x.converted, from.currency)} at ${+x.rate.toFixed(4)}`) : '') +
         line(`Arrives in ${esc(to.name)}`, '+' + wMoney(x.received, to.currency), ' pos') +
         (x.cross && x.fee && x.realRate ? line('Real rate after the fee', rateText(x.realRate)) : '') +
-        '<span class="muted small">Changes these two accounts only, not your budget funds.</span>';
+        `<span class="muted small">${x.fee ? 'The fee is saved as a “Transfer fee” expense. ' : ''}${from.linked || to.linked ? 'Savings ▸ Accounts updates too.' : ''}</span>`;
     } else if (F.kind === 'interest') {
       const amt = Number(r.amount) || 0;
       const fy = /^\d{4}-\d{2}-\d{2}$/.test(r.date || '') ? E.fyOf(r.date) : M.currentFY;
@@ -2354,6 +2396,34 @@
     });
   }
 
+  /** Like persist, for entries that are saved together: all of them show now, and all are undone if the save fails. */
+  function persistBundle(items, msg, reopen) {
+    const before = {};
+    items.forEach(it => {
+      const list = state.app.data[it.kind] || [];
+      if (!before[it.kind]) before[it.kind] = list.slice();
+      const rest = list.filter(r => String(r.id) !== String(it.remove || it.record.id));
+      state.app.data[it.kind] = it.remove ? rest : rest.concat(it.record);
+    });
+    refreshLocal();
+    toast(msg);
+    pendingSaves++;
+    return call('saveBundle', items).then(res => {
+      (res && res.records || []).forEach(it => {
+        const list = state.app.data[it.kind] || [];
+        const i = list.findIndex(r => String(r.id) === String(it.record.id));
+        if (i >= 0) list[i] = Object.assign({}, list[i], it.record);
+      });
+      saveDone(res);
+    }, err => {
+      Object.keys(before).forEach(k => { state.app.data[k] = before[k]; });
+      refreshLocal();
+      toast('Couldn’t save: ' + errText(err), true);
+      if (reopen && !state.form) openForm(reopen.kind, reopen.rec, { isNew: reopen.isNew });
+      saveDone(null);
+    });
+  }
+
   function saveForm(addAnother) {
     readForm();
     const F = state.form;
@@ -2367,7 +2437,17 @@
     }
     if (F.kind === 'wallets' && !payload.name) { toast('Give the account a name.', true); return; }
     if (F.kind === 'walletChecks') {
-      payload.walletName = wOf(payload.walletId).name;
+      const w = wOf(payload.walletId);
+      if (w.linked) {
+        // These balances are worked out, so the bank's figure goes in as an adjustment for the difference.
+        const diff = E.round2(Number(payload.amount) - w.balance);
+        if (Math.abs(diff) < 0.005) { toast('That’s already the balance.', true); return; }
+        closeModal();
+        persist('adjustments', { id: newId('adjustments'), date: payload.date, person: w.owner === 'Shared' ? state.M.viewer : w.owner, fromFund: diff < 0 ? payload.fund : '', toFund: diff > 0 ? payload.fund : '',
+          amount: Math.abs(diff), note: payload.note || 'Balance fix' }, true, '✓ Balance fixed');
+        return;
+      }
+      payload.walletName = w.name;
       payload.at = payload.at || Date.now();
     }
     if (F.kind === 'walletTransfers') {
@@ -2378,7 +2458,8 @@
       if (cross && !(Number(payload.rate) > 0)) { toast('Enter the transfer rate.', true); return; }
       if (Number(payload.fee) < 0) { toast('The fee can’t be negative.', true); return; }
       if (payload.feeIn === 'Yes' && Number(payload.fee) >= Number(payload.amount)) { toast('The fee must be less than the amount.', true); return; }
-      Object.assign(payload, { fromName: from.name, toName: to.name, at: payload.at || Date.now() });
+      // Transfers saved before fees became expenses have no person yet.
+      Object.assign(payload, { fromName: from.name, toName: to.name, fromCur: from.currency, toCur: to.currency, at: payload.at || Date.now(), person: payload.person || state.M.viewer });
       if (!cross) Object.assign(payload, { rate: '', received: '' });
     }
     if (F.kind === 'expenses') payload.splitPct = payload.person === 'Shared' && !blank(payload.splitPct) ? Number(payload.splitPct) / 100 : '';
@@ -2407,7 +2488,30 @@
     const label = F.kind === 'income' && F.payType === 'other' ? 'Income' : KIND_LABEL[F.kind];
     if (addAnother) openForm(F.kind, newRecord(F.kind, { date: payload.date, person: payload.person, category: payload.category }));
     else closeModal();
-    persist(reopen.kind, payload, isNew, isNew ? '✓ ' + label + ' added' : '✓ Saved', reopen);
+    if (reopen.kind === 'walletTransfers') persistBundle(transferItems(payload), isNew ? '✓ Transfer added' : '✓ Saved', reopen);
+    else persist(reopen.kind, payload, isNew, isNew ? '✓ ' + label + ' added' : '✓ Saved', reopen);
+  }
+
+  /** A transfer, plus the entries it makes in the budget: its fee as an expense, and any move in or out of a Savings account. */
+  function transferItems(t) {
+    const from = wOf(t.fromId);
+    const to = wOf(t.toId);
+    const x = E.walletTransfer(from.currency, to.currency, t, state.M.general.exchangeRate);
+    // These two rows are seen by both of you, so they name the countries and not the private accounts.
+    const route = wPlace(from.currency)[3] + ' → ' + wPlace(to.currency)[3];
+    const adjustment = { kind: 'adjustments', remove: 'A-wt-' + t.id };
+    const fee = { kind: 'expenses', remove: 'E-wt-' + t.id };
+    if (from.linked || to.linked) {
+      delete adjustment.remove;
+      adjustment.record = { id: 'A-wt-' + t.id, date: t.date, person: t.person, fromFund: from.linked ? t.fromFund : '', toFund: to.linked ? t.toFund : '', amount: to.linked ? x.received : x.converted, note: 'Wallet transfer: ' + route };
+    }
+    if (x.fee) {
+      delete fee.remove;
+      const myrFee = from.currency === 'MYR';
+      fee.record = { id: 'E-wt-' + t.id, date: t.date, person: t.person, paidBy: t.person, amount: x.feeAUD, category: E.FEE_CATEGORY, description: route, splitPct: '', fund: t.fromFund || '',
+        currency: myrFee ? 'MYR' : '', fxAmount: myrFee ? x.fee : '', fxRate: myrFee ? x.rate || state.M.general.exchangeRate : '' };
+    }
+    return [{ kind: 'walletTransfers', record: t }, adjustment, fee];
   }
 
   function deleteForm() {
@@ -2420,6 +2524,11 @@
     if (!confirm('Delete this ' + KIND_LABEL[F.kind].toLowerCase() + '? This can\'t be undone.')) return;
     const kind = F.kind;
     const id = F.rec.id;
+    if (kind === 'walletTransfers') {
+      closeModal();
+      persistBundle([{ kind, remove: id }, { kind: 'adjustments', remove: 'A-wt-' + id }, { kind: 'expenses', remove: 'E-wt-' + id }], 'Deleted');
+      return;
+    }
     const before = (state.app.data[kind] || []).slice();
     state.app.data[kind] = before.filter(r => String(r.id) !== String(id));
     closeModal();
@@ -2528,8 +2637,9 @@
 
   // ---------- staying up to date ----------
   // Every change, from either app, any phone or the Sheet itself, gives the data a new version on
-  // the server. While the app is on screen it checks that version every 20 seconds (and as soon as
-  // it comes back to the screen) and quietly loads the latest when it differs.
+  // the server. While the app is on screen it checks that version every few seconds (and as soon as
+  // it comes back to the screen) and quietly loads the latest when it differs. Apps Script can't
+  // push to an open page, so this is as close to live as it gets. Left untouched, it checks less often.
 
   let loading = null; // the copy being loaded, if any
 
@@ -2609,8 +2719,19 @@
 
   window.__trackerReload = reload;
   window.__trackerCheck = checkForUpdates; // the iPhone app calls this when a notification arrives
-  setInterval(checkForUpdates, 20000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdates(); });
+  const CHECK_EVERY = 3000;
+  const CHECK_IDLE = 15000;
+  const IDLE_AFTER = 5 * 60 * 1000;
+  let lastUsed = Date.now();
+  ['pointerdown', 'keydown', 'scroll'].forEach(type => document.addEventListener(type, () => { lastUsed = Date.now(); }, { passive: true, capture: true }));
+  function nextCheck() {
+    setTimeout(() => { checkForUpdates().then(nextCheck, nextCheck); }, Date.now() - lastUsed < IDLE_AFTER ? CHECK_EVERY : CHECK_IDLE);
+  }
+  nextCheck();
+  const backOnScreen = () => { lastUsed = Date.now(); if (!document.hidden) checkForUpdates(); };
+  document.addEventListener('visibilitychange', backOnScreen);
+  window.addEventListener('focus', backOnScreen);
+  window.addEventListener('pageshow', backOnScreen);
   window.addEventListener('online', checkForUpdates);
   // Typing in the page (not the pop-up form) holds back background redraws until it's saved or left.
   document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#view')) state.viewEdited = true; }, true);
@@ -2649,26 +2770,35 @@
       render();
       window.scrollTo(0, 0);
     } else if (act === 'wallet-new') openForm('wallets', newRecord('wallets', { currency: key }), { isNew: true });
-    else if (act === 'wallet-update') openForm('walletChecks', newRecord('walletChecks', { walletId: key }), { isNew: true });
+    else if (act === 'wallet-claim') {
+      if (!confirm('This ' + (window.__PWA__ ? 'phone' : 'Google account') + ' is ' + pName(key) + '’s? You can’t change this later.')) return;
+      plainAction('walletClaim', el, '🔐 Your wallet is ready', null, [key]);
+    } else if (act === 'wallet-edit') {
+      const w = wOf(key);
+      const saved = (state.app.data.wallets || []).find(r => String(r.id) === key);
+      openForm('wallets', saved || { id: w.id, date: w.date, name: w.name, currency: w.currency, type: w.type, owner: w.owner, number: '', opening: '', colour: WALLET_COLOUR, badge: '', logo: '', note: '', closed: '' }, { isNew: false });
+    } else if (act === 'wallet-update') openForm('walletChecks', newRecord('walletChecks', { walletId: key }), { isNew: true });
     else if (act === 'wallet-transfer') walletTransferForm(key);
     else if (act === 'wallet-type') { readForm(); state.form.rec.type = key; renderForm(); }
     else if (act === 'wallet-cur') {
       readForm();
       const r = state.form.rec;
-      if (r.badge) Object.assign(r, { name: '', badge: '', colour: WALLET_COLOUR }); // that quick pick is in the other country
+      if (r.badge) Object.assign(r, { name: '', badge: '', logo: '', colour: WALLET_COLOUR }); // that quick pick is in the other country
       r.currency = key;
       renderForm();
     } else if (act === 'wallet-brand') {
       readForm();
       const r = state.form.rec;
       const b = WALLET_BRANDS[wPlace(r.currency)[0]].find(x => x[0] === key);
-      Object.assign(r, { name: b[0], colour: b[1], badge: b[2] });
+      Object.assign(r, { colour: b[1], badge: b[2], logo: b[3] });
+      if (!(wOf(r.id) || {}).linked) r.name = b[0]; // Everyday Account stays Everyday Account
       renderForm();
     } else if (act === 'form-owner') { readForm(); state.form.rec.owner = key; renderForm(); }
     else if (act === 'wt-swap') {
       readForm();
       const r = state.form.rec;
-      Object.assign(r, { fromId: r.toId, toId: r.fromId, received: '' });
+      Object.assign(r, { fromId: r.toId, toId: r.fromId, fromFund: r.toFund, toFund: r.fromFund, received: '' });
+      transferFunds(r);
       state.form.calc.fixed = wOf(r.fromId).currency;
       renderForm();
     } else if (act === 'wt-feein') { readForm(); state.form.rec.feeIn = key; renderForm(); }
@@ -2794,7 +2924,7 @@
         const rec = newRecord('expenses');
         rec.person = 'Shared';
         openForm('expenses', rec, { isNew: true });
-      } else if (state.view === 'wallet') walletTransferForm(state.walletId);
+      } else if (state.view === 'wallet' && state.M.viewer && (state.person === 'All' || state.person === state.M.viewer)) walletTransferForm(state.walletId);
       else openForm(defaultKind());
     }
     else if (act === 'edit') editEntry(el.dataset.kind, el.dataset.id);
@@ -2881,6 +3011,7 @@
     if (state.form && (el.name === 'fromId' || el.name === 'toId')) {
       readForm();
       state.form.rec.received = '';
+      transferFunds(state.form.rec);
       state.form.calc.fixed = wOf(state.form.rec.fromId).currency;
       renderForm();
       return;
@@ -2950,7 +3081,7 @@
     }
   });
 
-  /** The transfer form, starting from one account. With fewer than two accounts, adds an account first. */
+  /** The transfer form, starting from one account. With fewer than two accounts (no bank accounts set up yet), adds one first. */
   function walletTransferForm(fromId) {
     if (state.M.wallets.filter(w => !w.closed).length < 2) {
       toast('Add at least two accounts first.', true);
@@ -3004,6 +3135,6 @@
     }
     openFromLink(P);
     // The iPhone app opens from the copy kept on the phone: check it's still the latest.
-    if (window.__PWA__) setTimeout(() => (BOOT.unsaved ? reload(true) : checkForUpdates()), 200);
+    if (window.__PWA__) setTimeout(() => (BOOT.unsaved || !('viewer' in BOOT.data) ? reload(true) : checkForUpdates()), 200);
   }
 })();

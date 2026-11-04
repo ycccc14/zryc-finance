@@ -18,6 +18,9 @@ function TrackerEngine() {
   const ALL = 'All';
   const SHARED = 'Shared';
 
+  // Wallet transfer fees are saved as expenses in this category, which is always there.
+  const FEE_CATEGORY = 'Transfer fee';
+
   // Kinds of real-money account. debt: the balance is what's owed, so it counts against the total.
   const WALLET_TYPES = {
     bank: { emoji: '🏦', label: 'Bank account', hint: 'Savings or everyday account' },
@@ -156,6 +159,9 @@ function TrackerEngine() {
       fund: String(c.fund || '').trim(),
       icon: isBlank(c.icon) ? '' : String(c.icon).trim(),
     }));
+    if (funds.length && !categories.some(c => c.name === FEE_CATEGORY)) {
+      categories.push({ name: FEE_CATEGORY, fund: (funds.find(f => f.name === 'Living Expenses') || funds[0]).name, icon: '💱' });
+    }
     const taxYears = {};
     (raw.taxYears || []).filter(t => !isBlank(t.fy)).forEach(t => {
       taxYears[normFy(t.fy)] = {
@@ -305,7 +311,8 @@ function TrackerEngine() {
     const worked = !cross ? converted : !rate ? 0 : fromCur === 'AUD' ? converted * rate : converted / rate;
     const received = round2(!cross || isBlank(r.received) ? worked : num(r.received));
     const realRate = !cross || !left || !received ? 0 : fromCur === 'AUD' ? received / left : left / received;
-    return { cross, amount, fee, feeIn, rate, converted, left, received, realRate, feeAUD: fromCur === 'MYR' ? (rate ? fee / rate : 0) : fee };
+    const fx = rate || defaultRate || 0;
+    return { cross, amount, fee, feeIn, rate, converted, left, received, realRate, feeAUD: round2(fromCur === 'MYR' ? (fx ? fee / fx : 0) : fee) };
   }
 
   /** One account in one month: money in, money out, and its balance at the end of each day (as shown on the card). */
@@ -652,9 +659,11 @@ function TrackerEngine() {
     }));
 
     // --- wallet: the real money in each account, in that account's own currency ---
-    // Separate from the funds above: these are balances you record, not budget sums.
+    // `data.viewer` is whoever's device this is: the server only sends that person's accounts and shared ones.
+    // Their bank accounts above come first, with the balances of the Accounts page; the rest are balances you record.
+    const viewer = byCode[data.viewer] ? data.viewer : '';
     const walletById = {};
-    const wallets = (data.wallets || []).map(r => {
+    const toWallet = r => {
       const type = WALLET_TYPES[r.type] ? r.type : 'bank';
       const currency = r.currency === 'MYR' ? 'MYR' : 'AUD';
       const debt = !!WALLET_TYPES[type].debt;
@@ -662,11 +671,19 @@ function TrackerEngine() {
       const w = {
         id: String(r.id), date: validDate(r.date) ? r.date : '', name: String(r.name || '').trim(), currency, country: currency === 'MYR' ? 'MY' : 'AU',
         type, debt, owner: byCode[r.owner] ? r.owner : SHARED, number: String(r.number || ''), opening, start: debt ? -opening : opening,
-        colour: r.colour || '', badge: String(r.badge || ''), note: r.note || '', closed: yes(r.closed),
+        colour: r.colour || '', badge: String(r.badge || ''), logo: String(r.logo || ''), note: r.note || '', closed: yes(r.closed), linked: r.linked || '',
       };
       walletById[w.id] = w;
       return w;
+    };
+    const savedWallets = data.wallets || [];
+    const linkedWallets = !viewer ? [] : accountNames.map(a => {
+      const owner = /shared/i.test(a) ? SHARED : viewer;
+      const id = 'link:' + owner + ':' + a;
+      const look = savedWallets.find(r => String(r.id) === id) || {}; // the bank, colour and digits chosen for it
+      return toWallet(Object.assign({ name: a }, look, { id, date: start, currency: 'AUD', type: 'bank', owner, opening: 0, closed: '', linked: a }));
     });
+    const wallets = linkedWallets.concat(savedWallets.filter(r => String(r.id).indexOf('link:') !== 0).map(toWallet));
     const walletChecks = (data.walletChecks || []).map(r => {
       if (!validDate(r.date)) { warn('A wallet balance has no valid date and was skipped.'); return null; }
       if (!walletById[r.walletId]) { warn('A wallet balance on ' + r.date + ' is for an account that no longer exists and was skipped.'); return null; }
@@ -674,8 +691,10 @@ function TrackerEngine() {
     }).filter(Boolean);
     const walletTransfers = (data.walletTransfers || []).map(r => {
       if (!validDate(r.date)) { warn('A wallet transfer has no valid date and was skipped.'); return null; }
-      const from = walletById[r.fromId];
-      const to = walletById[r.toId];
+      // An account of the other person's arrives with no ID: all that's known is its currency.
+      const side = (id, name, cur) => walletById[id] || (id ? null : { id: '', name: name || 'Private account', currency: cur === 'MYR' ? 'MYR' : 'AUD', owner: '' });
+      const from = side(r.fromId, r.fromName, r.fromCur);
+      const to = side(r.toId, r.toName, r.toCur);
       if (!from || !to || from === to) { warn('A wallet transfer on ' + r.date + ' uses an account that no longer exists and was skipped.'); return null; }
       return Object.assign(walletTransfer(from.currency, to.currency, r, S.general.exchangeRate), {
         id: r.id, date: r.date, month: monthOf(r.date), at: num(r.at), from, to, note: r.note || '',
@@ -683,7 +702,34 @@ function TrackerEngine() {
     }).filter(Boolean).sort(byDate);
     // Same day: in the order they were recorded. Rows with no time (typed into the Sheet): transfers first.
     const eventOrder = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.at - b.at || a.rank - b.rank);
+    /** A bank account's records: everything that makes up its Accounts page balance, for that person (or both, if shared). */
+    function ledgerEvents(w) {
+      const k = w.owner === SHARED ? ALL : w.owner;
+      const here = f => fundAccount[f] === w.linked;
+      const events = [];
+      const add = (kind, r, title, note, change) => { if (Math.abs(change) >= 0.005) events.push({ kind, id: r.id, date: r.date, month: r.month, title, note, change }); };
+      income.filter(r => r.date >= start && (k === ALL || r.person === k)).forEach(r => add('income', r, r.hours ? 'Pay' : 'Other income', r.note, sum(fundNames.filter(here).map(f => r.alloc[f]))));
+      expenses.filter(r => r.date >= start && here(r.fund)).forEach(r => add('expenses', r, r.description || r.category, r.description ? r.category : '', -(k === ALL ? r.amount : r.shares[k] || 0)));
+      adjustments.filter(r => r.date >= start && (k === ALL || r.person === k) && r.fromAccount !== r.toAccount).forEach(r =>
+        add('adjustments', r, r.note || 'Transfer', '', (r.toAccount === w.linked ? r.amount : 0) - (r.fromAccount === w.linked ? r.amount : 0)));
+      interest.filter(r => r.date >= start && here(r.fund)).forEach(r => add('interest', r, 'Interest', r.note, k === ALL ? r.amount : r.shares[k] || 0));
+      let running = 0;
+      // Fund shares aren't whole cents, so only round for showing: the last line must match the account's balance.
+      events.sort(byDate).forEach(e => {
+        running += e.change;
+        e.balance = round2(running);
+        e.change = round2(e.change);
+      });
+      return events;
+    }
     wallets.forEach(w => {
+      if (w.linked) {
+        w.events = ledgerEvents(w);
+        w.balance = round2(ledgers[w.owner === SHARED ? ALL : w.owner][w.linked].balance);
+        w.shown = w.balance;
+        w.checked = '';
+        return;
+      }
       const events = walletChecks.filter(c => c.walletId === w.id)
         .map(c => ({ kind: 'walletChecks', id: c.id, date: c.date, month: c.month, at: c.at, rank: 1, set: w.debt ? -c.amount : c.amount, note: c.note }));
       walletTransfers.forEach(t => {
@@ -769,7 +815,7 @@ function TrackerEngine() {
       allocations: S.allocations,
       currentAllocation: allocationFor(today, S.allocations),
       income, expenses, adjustments, interest, paybacks, split,
-      wallets, walletTransfers, walletTotals,
+      viewer, wallets, walletTransfers, walletTotals,
       weekly: Object.keys(weekly).sort().map(k => weekly[k]),
       monthly, fyTotals, catByMonth, balances, estimates,
       months: Object.keys(monthSet).sort(),
@@ -779,7 +825,7 @@ function TrackerEngine() {
   }
 
   return {
-    compute, settingsOf, withhold, annualTax, autoScale, scaleFor, walletTransfer, walletMonth, WALLET_TYPES,
+    compute, settingsOf, withhold, annualTax, autoScale, scaleFor, walletTransfer, walletMonth, WALLET_TYPES, FEE_CATEGORY,
     fyOf, fyMonths, fyName, normFy, monthOf, weekStart, addDays, addMonths, monthRange, todayISO,
     isBlank, num, pct, round2,
     ALL, SHARED, RESIDENT, FOREIGN, WHM,
