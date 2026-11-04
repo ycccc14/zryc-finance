@@ -575,6 +575,40 @@
   .calc-keys button.eq { background: var(--brand); color: var(--brand-ink); font-weight: 800; box-shadow: none; }
   .calc-keys button.wide { grid-column: span 2; }
   .calc-keys button:active { transform: scale(.96); }
+  /* Wallet page: bank cards, stacked so each one's name and balance stay in view. */
+  .wsection { display: grid; gap: 12px; align-content: start; min-width: 0; }
+  .wsection .list-head { margin: 4px 2px 0; flex-wrap: nowrap; }
+  .wsection > .btn.link { justify-self: start; }
+  .wstack { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .wcard { position: relative; isolation: isolate; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; min-width: 0; height: 148px; padding: 14px 16px; border-radius: 20px;
+    color: var(--wi); background: var(--c); background: linear-gradient(135deg, var(--c), color-mix(in srgb, var(--c) 72%, #000)); box-shadow: 0 -2px 10px rgba(0, 0, 0, .08), 0 8px 20px rgba(0, 0, 0, .1); }
+  .wcard::after { content: ''; position: absolute; right: -44px; bottom: -70px; width: 190px; height: 190px; border-radius: 50%; background: rgba(255, 255, 255, .1); pointer-events: none; }
+  .wstack .wcard + .wcard { margin-top: -62px; }
+  .wcard[role=button]:active { transform: translateY(-2px); }
+  .wtop { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .wbadge { flex: none; min-width: 38px; height: 38px; padding: 0 5px; border-radius: 11px; display: grid; place-items: center; font-size: 13px; font-weight: 800; background: rgba(255, 255, 255, .22); }
+  .wmain { flex: 1; min-width: 0; display: grid; }
+  .wname { font-weight: 750; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wkind { font-size: 12px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wbal { flex: none; max-width: 52%; text-align: right; font-size: 18px; font-weight: 800; letter-spacing: -.01em; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wbal small { display: block; font-size: 11px; font-weight: 650; opacity: .85; letter-spacing: 0; }
+  .wbottom { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; letter-spacing: .04em; opacity: .95; }
+  .wtag { background: rgba(255, 255, 255, .22); border-radius: 999px; padding: 1px 9px; font-size: 11px; font-weight: 750; letter-spacing: 0; }
+  .wtitle { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wsolo .wcard { height: 160px; }
+  .wsolo .wbal { font-size: 20px; }
+  .wsolo .wname, .wsolo .wkind { white-space: normal; }
+  .wactions .btn { padding: 10px 6px; white-space: nowrap; }
+  .wback { font-size: 26px; line-height: 1; padding-bottom: 4px; }
+  @media (min-width: 820px) {
+    .wstack .wcard + .wcard { margin-top: 12px; }
+  }
+  .wtypes { background: var(--soft); border-radius: 16px; overflow: hidden; }
+  .wtypes button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 14px; border: 0; background: none; text-align: left; cursor: pointer; }
+  .wtypes button + button { border-top: 1px solid var(--line); }
+  .wtype-text { flex: 1; min-width: 0; display: grid; }
+  .wroute { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: end; }
+  .wroute .icon-btn { margin-bottom: 2px; }
   /* Phones show only what's needed day to day. */
   @media (max-width: 699px) { .hide-phone { display: none !important; } }
 </style>
@@ -606,8 +640,8 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="pair" hidden></div>
   <script src="vendor/chart.umd.js"></script>
-  <script src="engine.js?v=1c51db30ef"></script>
-  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = '1c51db30ef';</script>
-  <script src="boot.js?v=1c51db30ef"></script>
+  <script src="engine.js?v=5748ffd52b"></script>
+  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = '5748ffd52b';</script>
+  <script src="boot.js?v=5748ffd52b"></script>
 </body>
 </html>

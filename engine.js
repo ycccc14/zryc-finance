@@ -7,7 +7,7 @@
  *
  * `data` is what getAppData() returns under .data:
  *   { settings: { general, people, funds, allocations, categories, taxYears, brackets, withholding },
- *     income: [...], expenses: [...], adjustments: [...] }
+ *     income: [...], expenses: [...], adjustments: [...], wallets: [...], walletChecks: [...], walletTransfers: [...] }
  */
 function TrackerEngine() {
   'use strict';
@@ -17,6 +17,19 @@ function TrackerEngine() {
   const WHM = 'Working holiday maker';
   const ALL = 'All';
   const SHARED = 'Shared';
+
+  // Kinds of real-money account. debt: the balance is what's owed, so it counts against the total.
+  const WALLET_TYPES = {
+    bank: { emoji: '🏦', label: 'Bank account', hint: 'Savings or everyday account' },
+    ewallet: { emoji: '📱', label: 'E-wallet', hint: 'Touch ’n Go, GrabPay, PayPal, Wise' },
+    cash: { emoji: '💵', label: 'Cash', hint: 'Money in your purse' },
+    savings: { emoji: '🐷', label: 'Savings & investments', hint: 'Term deposit, ASB, EPF, shares' },
+    prepaid: { emoji: '🎫', label: 'Prepaid card', hint: 'Opal, Touch ’n Go card, gift cards' },
+    card: { emoji: '💳', label: 'Credit card', hint: 'Shows how much you owe', debt: true },
+    paylater: { emoji: '🧾', label: 'PayLater', hint: 'Afterpay, Atome, SPayLater', debt: true },
+    lent: { emoji: '🤝', label: 'Money lent', hint: 'Someone owes you' },
+    borrowed: { emoji: '🙏', label: 'Money borrowed', hint: 'You owe someone', debt: true },
+  };
 
   // ---------- value helpers ----------
 
@@ -274,6 +287,40 @@ function TrackerEngine() {
     let v = versions[0] || null;
     versions.forEach(a => { if (a.from <= date) v = a; });
     return v;
+  }
+
+  /**
+   * What a transfer does. `rate` is always MYR per 1 AUD, whichever way the money goes. The fee is
+   * in the sending currency: added on top of the amount, or (feeIn) taken out of it before converting.
+   * An amount typed into "received" replaces the worked-out one.
+   */
+  function walletTransfer(fromCur, toCur, r, defaultRate) {
+    const cross = fromCur !== toCur;
+    const amount = round2(num(r.amount));
+    const fee = round2(num(r.fee));
+    const feeIn = yes(r.feeIn);
+    const rate = cross ? num(r.rate) || defaultRate || 0 : 0;
+    const converted = round2(feeIn ? amount - fee : amount);
+    const left = round2(feeIn ? amount : amount + fee);
+    const worked = !cross ? converted : !rate ? 0 : fromCur === 'AUD' ? converted * rate : converted / rate;
+    const received = round2(!cross || isBlank(r.received) ? worked : num(r.received));
+    const realRate = !cross || !left || !received ? 0 : fromCur === 'AUD' ? received / left : left / received;
+    return { cross, amount, fee, feeIn, rate, converted, left, received, realRate, feeAUD: fromCur === 'MYR' ? (rate ? fee / rate : 0) : fee };
+  }
+
+  /** One account in one month: money in, money out, and its balance at the end of each day (as shown on the card). */
+  function walletMonth(w, ym, today) {
+    const changes = w.events.filter(e => e.month === ym).map(e => e.change);
+    const daysInMonth = new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7), 0)).getUTCDate();
+    const lastDay = ym === monthOf(today) ? +today.slice(8, 10) : ym > monthOf(today) ? 0 : daysInMonth;
+    const days = [];
+    for (let d = 1; d <= lastDay; d++) {
+      const date = ym + '-' + pad(d);
+      const past = w.events.filter(e => e.date <= date);
+      const value = past.length ? past[past.length - 1].balance : w.date && w.date <= date ? w.start : null;
+      days.push({ date, balance: value === null ? null : (w.debt ? -value : value) });
+    }
+    return { in: round2(sum(changes.filter(c => c > 0))), out: round2(-sum(changes.filter(c => c < 0))), days };
   }
 
   // ---------- main ----------
@@ -604,6 +651,80 @@ function TrackerEngine() {
       L.balanceMYR = L.balance * S.general.exchangeRate;
     }));
 
+    // --- wallet: the real money in each account, in that account's own currency ---
+    // Separate from the funds above: these are balances you record, not budget sums.
+    const walletById = {};
+    const wallets = (data.wallets || []).map(r => {
+      const type = WALLET_TYPES[r.type] ? r.type : 'bank';
+      const currency = r.currency === 'MYR' ? 'MYR' : 'AUD';
+      const debt = !!WALLET_TYPES[type].debt;
+      const opening = round2(num(r.opening));
+      const w = {
+        id: String(r.id), date: validDate(r.date) ? r.date : '', name: String(r.name || '').trim(), currency, country: currency === 'MYR' ? 'MY' : 'AU',
+        type, debt, owner: byCode[r.owner] ? r.owner : SHARED, number: String(r.number || ''), opening, start: debt ? -opening : opening,
+        colour: r.colour || '', badge: String(r.badge || ''), note: r.note || '', closed: yes(r.closed),
+      };
+      walletById[w.id] = w;
+      return w;
+    });
+    const walletChecks = (data.walletChecks || []).map(r => {
+      if (!validDate(r.date)) { warn('A wallet balance has no valid date and was skipped.'); return null; }
+      if (!walletById[r.walletId]) { warn('A wallet balance on ' + r.date + ' is for an account that no longer exists and was skipped.'); return null; }
+      return { id: r.id, date: r.date, month: monthOf(r.date), at: num(r.at), walletId: String(r.walletId), amount: round2(num(r.amount)), note: r.note || '' };
+    }).filter(Boolean);
+    const walletTransfers = (data.walletTransfers || []).map(r => {
+      if (!validDate(r.date)) { warn('A wallet transfer has no valid date and was skipped.'); return null; }
+      const from = walletById[r.fromId];
+      const to = walletById[r.toId];
+      if (!from || !to || from === to) { warn('A wallet transfer on ' + r.date + ' uses an account that no longer exists and was skipped.'); return null; }
+      return Object.assign(walletTransfer(from.currency, to.currency, r, S.general.exchangeRate), {
+        id: r.id, date: r.date, month: monthOf(r.date), at: num(r.at), from, to, note: r.note || '',
+      });
+    }).filter(Boolean).sort(byDate);
+    // Same day: in the order they were recorded. Rows with no time (typed into the Sheet): transfers first.
+    const eventOrder = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.at - b.at || a.rank - b.rank);
+    wallets.forEach(w => {
+      const events = walletChecks.filter(c => c.walletId === w.id)
+        .map(c => ({ kind: 'walletChecks', id: c.id, date: c.date, month: c.month, at: c.at, rank: 1, set: w.debt ? -c.amount : c.amount, note: c.note }));
+      walletTransfers.forEach(t => {
+        const base = { kind: 'walletTransfers', id: t.id, date: t.date, month: t.month, at: t.at, rank: 0, transfer: t, note: t.note };
+        if (t.from === w) events.push(Object.assign({ delta: -t.left }, base));
+        if (t.to === w) events.push(Object.assign({ delta: t.received }, base));
+      });
+      events.sort(eventOrder);
+      let running = w.start;
+      w.checked = w.date;
+      events.forEach(e => {
+        const before = running;
+        running = e.kind === 'walletChecks' ? e.set : round2(running + e.delta);
+        e.change = round2(running - before);
+        e.balance = running;
+        if (e.kind === 'walletChecks') w.checked = e.date;
+      });
+      w.events = events;
+      w.balance = running; // negative when money is owed
+      w.shown = w.debt ? -running : running;
+    });
+    const fxRate = S.general.exchangeRate;
+    const inAUD = w => (w.currency === 'MYR' ? (fxRate ? w.balance / fxRate : 0) : w.balance);
+    const walletTotals = {};
+    keys.forEach(k => {
+      const open = wallets.filter(w => !w.closed && (k === ALL || w.owner === k || w.owner === SHARED));
+      const moved = walletTransfers.filter(t => k === ALL || [t.from.owner, t.to.owner].some(o => o === k || o === SHARED));
+      const net = sum(open.map(inAUD));
+      const toMY = moved.filter(t => t.cross && t.from.currency === 'AUD');
+      const toAU = moved.filter(t => t.cross && t.from.currency === 'MYR');
+      walletTotals[k] = {
+        count: open.length, net, netMYR: net * fxRate,
+        aud: sum(open.filter(w => w.currency === 'AUD').map(w => w.balance)),
+        myr: sum(open.filter(w => w.currency === 'MYR').map(w => w.balance)),
+        debts: -sum(open.filter(w => w.debt).map(inAUD)),
+        toMY: { count: toMY.length, sent: sum(toMY.map(t => t.left)), received: sum(toMY.map(t => t.received)) },
+        toAU: { count: toAU.length, sent: sum(toAU.map(t => t.left)), received: sum(toAU.map(t => t.received)) },
+        feesAUD: sum(moved.map(t => t.feeAUD)),
+      };
+    });
+
     // --- end-of-year tax estimate ---
     const currentFY = fyOf(today);
     const estimates = {};
@@ -638,6 +759,7 @@ function TrackerEngine() {
     monthSet[monthOf(today)] = true;
     fySet[currentFY] = true;
     [income, expenses, adjustments, interest, paybacks].forEach(list => list.forEach(r => { monthSet[monthOf(r.date)] = true; fySet[fyOf(r.date)] = true; }));
+    [wallets, walletChecks, walletTransfers].forEach(list => list.forEach(r => { if (r.date) monthSet[monthOf(r.date)] = true; }));
 
     return {
       today, currentFY,
@@ -647,6 +769,7 @@ function TrackerEngine() {
       allocations: S.allocations,
       currentAllocation: allocationFor(today, S.allocations),
       income, expenses, adjustments, interest, paybacks, split,
+      wallets, walletTransfers, walletTotals,
       weekly: Object.keys(weekly).sort().map(k => weekly[k]),
       monthly, fyTotals, catByMonth, balances, estimates,
       months: Object.keys(monthSet).sort(),
@@ -656,7 +779,7 @@ function TrackerEngine() {
   }
 
   return {
-    compute, settingsOf, withhold, annualTax, autoScale, scaleFor,
+    compute, settingsOf, withhold, annualTax, autoScale, scaleFor, walletTransfer, walletMonth, WALLET_TYPES,
     fyOf, fyMonths, fyName, normFy, monthOf, weekStart, addDays, addMonths, monthRange, todayISO,
     isBlank, num, pct, round2,
     ALL, SHARED, RESIDENT, FOREIGN, WHM,
