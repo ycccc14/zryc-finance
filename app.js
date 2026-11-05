@@ -1348,7 +1348,7 @@
       ${tool('⚙️', 'Settings', 'data-act="view" data-key="settings"')}${tool('📥', 'Import CSV', 'data-act="go-import"')}
       <a href="${esc(state.app.sheetUrl)}" target="_blank" rel="noopener"><span class="q">📊</span>Google Sheet</a>
       ${tool('🔄', 'Refresh', 'data-act="reload"')}</div></section>`;
-    const fx = `<section class="card"><div class="card-head"><h2>💱 AUD ↔ MYR</h2><span class="hint">1 AUD = ${M.general.exchangeRate} MYR</span></div>
+    const fx = `<section class="card"><div class="card-head"><h2>💱 AUD ↔ MYR</h2><span class="hint">1 AUD = ${M.general.exchangeRate} MYR${state.app.rateDate ? ' · ' + fmtDate(state.app.rateDate) : ''}</span></div>
       <div class="fx"><label class="field"><span>AUD</span><input id="fx-aud" type="number" inputmode="decimal" step="0.01" value="100"></label><span class="eq">=</span>
         <label class="field"><span>MYR</span><input id="fx-myr" type="number" inputmode="decimal" step="0.01" value="${(100 * M.general.exchangeRate).toFixed(2)}"></label></div></section>`;
     const people = `<section class="card"><div class="card-head"><h2>👥 People</h2><button class="btn link" data-act="view" data-key="settings">Edit</button></div>
@@ -1435,7 +1435,7 @@
           <label class="field"><span>Shared split: ${esc(pName(M.codes[0]))} pays %</span><input id="s-split" type="number" step="any" inputmode="decimal" value="${blank(g.sharedSplit) ? 50 : +(E.pct(g.sharedSplit) * 100).toFixed(2)}"></label>
         </div>
         <label class="field" style="margin-top:12px"><span>App icon link (optional, https … .png)</span><input id="s-icon" type="url" placeholder="https://raw.githubusercontent.com/…/icon-512.png" value="${esc(g.iconUrl || '')}"></label>
-        <p class="muted small">Fund and account balances count from the start date (the day you opened / started tracking). The split is used when a Shared expense has no % of its own. The icon link sets the browser-tab and home-screen icon (see README).</p>
+        <p class="muted small">The MYR rate comes from Google Finance every morning${state.app.rateDate ? ' (last updated ' + fmtDate(state.app.rateDate) + ')' : ''}, so a rate typed here lasts until the next update. Entries and transfers keep the rate they were saved with. Fund and account balances count from the start date (the day you opened / started tracking). The split is used when a Shared expense has no % of its own. The icon link sets the browser-tab and home-screen icon (see README).</p>
         ${saveBar('save-general', 'Save')}</section>
 
       <section class="card" id="lock-card">${lockCard()}</section>
