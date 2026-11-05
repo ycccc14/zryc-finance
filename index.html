@@ -610,6 +610,23 @@
   .wtype-text { flex: 1; min-width: 0; display: grid; }
   .wroute { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: end; }
   .wroute .icon-btn { margin-bottom: 2px; }
+  /* App lock: covers everything, including open forms and messages. */
+  .lock { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 70; display: grid; place-items: center; overflow-y: auto; overscroll-behavior: contain; background: var(--band); color: var(--band-ink);
+    padding: calc(16px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom)); }
+  .lock[hidden] { display: none; }
+  .lock-box { display: grid; justify-items: center; gap: 10px; width: min(300px, 100%); text-align: center; }
+  .lock-box svg { border-radius: 14px; }
+  .lock-dots { display: flex; gap: 14px; margin-top: 4px; }
+  .lock-dots i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor; }
+  .lock-dots i.on { background: currentColor; }
+  .lock-note { margin: 0; min-height: 1.45em; font-size: 14px; font-weight: 650; }
+  .lock-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: min(14px, 2vh); width: 100%; justify-items: center; }
+  .lock-keys button { width: min(74px, 11vh); height: min(74px, 11vh); border: 0; border-radius: 50%; background: rgba(255, 255, 255, .6); color: var(--band-ink); font-size: 27px; font-weight: 650; cursor: pointer; touch-action: manipulation; }
+  .lock-keys button.op { background: none; font-size: 24px; }
+  .lock-keys button:active { transform: scale(.94); background: rgba(255, 255, 255, .9); }
+  .lock-keys button:disabled { opacity: .4; cursor: default; }
+  .lock .btn.link { color: var(--band-ink); }
+  @media (prefers-color-scheme: dark) { .lock-keys button { background: rgba(255, 255, 255, .1); } .lock-keys button:active { background: rgba(255, 255, 255, .2); } }
   /* Phones show only what's needed day to day. */
   @media (max-width: 699px) { .hide-phone { display: none !important; } }
 </style>
@@ -639,10 +656,11 @@
   <nav class="bottombar" id="nav-bottom" aria-label="Pages"></nav>
   <div id="modal" class="modal" hidden></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="lock" class="lock" hidden></div>
   <div id="pair" hidden></div>
   <script src="vendor/chart.umd.js"></script>
-  <script src="engine.js?v=97cee93f60"></script>
-  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = '97cee93f60';</script>
-  <script src="boot.js?v=97cee93f60"></script>
+  <script src="engine.js?v=d8e9395890"></script>
+  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = 'd8e9395890';</script>
+  <script src="boot.js?v=d8e9395890"></script>
 </body>
 </html>

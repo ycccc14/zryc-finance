@@ -29,6 +29,20 @@
     } catch (e) { /* no IndexedDB: notifications fall back to a generic message */ }
   }
 
+  // Forgot the app's passcode: sign this phone out (the server forgets it too) so it has to be paired again.
+  window.__trackerForget = function () {
+    var token = store.get(TOKEN) || '';
+    var done = function () {
+      [TOKEN, CACHE, 'tracker.lock', 'tracker.lock-left', 'tracker.lock-fails'].forEach(function (k) { store.del(k); });
+      idbSet('token', null);
+      location.reload();
+    };
+    crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)).then(function (d) {
+      var id = Array.from(new Uint8Array(d)).map(function (b) { return ('0' + b.toString(16)).slice(-2); }).join('').slice(0, 12);
+      return post({ token: token, fn: 'apiRemoveDevice', args: [id] });
+    }).then(done, done); // no signal: this phone still forgets its token
+  };
+
   if ('serviceWorker' in navigator) {
     // From the service worker: a notification was tapped while the app was open (show what it's
     // about), or one just arrived (something probably changed: check now).

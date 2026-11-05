@@ -1438,6 +1438,8 @@
         <p class="muted small">Fund and account balances count from the start date (the day you opened / started tracking). The split is used when a Shared expense has no % of its own. The icon link sets the browser-tab and home-screen icon (see README).</p>
         ${saveBar('save-general', 'Save')}</section>
 
+      <section class="card" id="lock-card">${lockCard()}</section>
+
       <section class="card" id="install-card"></section>
 
       <section class="card" id="push-card"></section>
@@ -2740,6 +2742,178 @@
     : state.view === 'balances' || state.view === 'accounts' ? 'adjustments' : 'expenses');
 
   // ======================================================================
+  // App lock: a passcode that stays on this device
+  // ======================================================================
+  // Only a salted hash is kept, in this device's storage. It's never sent to the server, so each
+  // phone has its own. `lockState.mode`: unlock, check (the current passcode, before changing it),
+  // new, confirm, or curtain (just covers the screen while the app is in the background).
+
+  const LOCK_LENGTH = 6;
+  const LOCK_ROUNDS = 150000;
+  const LOCK_TRIES = 5; // wrong tries before having to wait
+  const LOCK_WAIT = 30000; // doubles with each further wrong try
+  const LOCK_WAIT_MAX = 15 * 60 * 1000;
+  const LOCK_TIMES = [[0, 'Straight away'], [1, 'After 1 minute'], [5, 'After 5 minutes'], [15, 'After 15 minutes']];
+  const lockState = { mode: '', then: '', typed: '', first: '', note: '', busy: false };
+  let lockTick;
+
+  const lockRead = key => { try { return JSON.parse(store.get(key) || 'null'); } catch (e) { return null; } };
+  const lockSaved = () => lockRead('lock');
+  const lockFails = () => lockRead('lock-fails') || { n: 0, until: 0 };
+  const lockWaitLeft = () => Math.max(0, lockFails().until - Date.now());
+  const toHex = bytes => Array.from(bytes).map(b => ('0' + b.toString(16)).slice(-2)).join('');
+
+  async function lockHash(code, salt, rounds) {
+    const bytes = new Uint8Array(salt.match(/../g).map(h => parseInt(h, 16)));
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(code), 'PBKDF2', false, ['deriveBits']);
+    return toHex(new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: bytes, iterations: rounds }, key, 256)));
+  }
+
+  /** Long enough away that the passcode is needed again. A clock moved backwards counts too. */
+  function lockExpired() {
+    const saved = lockSaved();
+    const away = Date.now() - (Number(store.get('lock-left')) || 0);
+    return !saved.after || away < 0 || away >= saved.after * 60000;
+  }
+
+  function lockCover(on) {
+    ['.app', '#nav-bottom', '#modal'].forEach(sel => { const el = $(sel); if (el) el.inert = on; });
+  }
+
+  function openLock(mode, then) {
+    Object.assign(lockState, { mode, then: then || '', typed: '', first: '', note: '', busy: false });
+    $('#lock').hidden = false;
+    lockCover(true);
+    renderLock();
+  }
+
+  function closeLock() {
+    clearTimeout(lockTick);
+    lockState.mode = '';
+    $('#lock').hidden = true;
+    $('#lock').innerHTML = '';
+    lockCover(false);
+    const card = $('#lock-card');
+    if (card) card.innerHTML = lockCard();
+  }
+
+  function renderLock() {
+    const L = lockState;
+    clearTimeout(lockTick);
+    if (L.mode === 'curtain') { $('#lock').innerHTML = `<div class="lock-box">${appIcon(72)}</div>`; return; }
+    const wait = L.mode === 'unlock' || L.mode === 'check' ? lockWaitLeft() : 0;
+    if (wait) lockTick = setTimeout(renderLock, 1000);
+    const title = { unlock: 'Enter passcode', check: 'Enter your current passcode', new: 'Choose a ' + LOCK_LENGTH + '-digit passcode', confirm: 'Type it again' }[L.mode];
+    const dots = Array.from({ length: LOCK_LENGTH }, (_, i) => `<i${i < L.typed.length ? ' class="on"' : ''}></i>`).join('');
+    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'].map(k => (k
+      ? `<button type="button" data-act="lock-key" data-key="${k}"${k === '⌫' ? ' class="op" aria-label="Delete"' : ''}${wait ? ' disabled' : ''}>${k}</button>` : '<span></span>')).join('');
+    $('#lock').innerHTML = `<div class="lock-box" role="dialog" aria-modal="true" aria-label="${title}">${appIcon(56)}<h2>${title}</h2>
+      <div class="lock-dots" role="img" aria-label="${L.typed.length} of ${LOCK_LENGTH} digits entered">${dots}</div>
+      <p class="lock-note" role="status">${wait ? 'Too many tries. Wait ' + Math.ceil(wait / 1000) + ' seconds.' : esc(L.note) || '&nbsp;'}</p>
+      <div class="lock-keys">${keys}</div>
+      ${L.mode === 'unlock' ? '<button type="button" class="btn link" data-act="lock-forgot">Forgot passcode?</button>' : '<button type="button" class="btn link" data-act="lock-cancel">Cancel</button>'}</div>`;
+  }
+
+  function lockKey(k) {
+    const L = lockState;
+    if (L.busy || L.mode === 'curtain' || ((L.mode === 'unlock' || L.mode === 'check') && lockWaitLeft())) return;
+    if (k === '⌫') L.typed = L.typed.slice(0, -1);
+    else if (L.typed.length < LOCK_LENGTH) L.typed += k;
+    renderLock();
+    if (L.typed.length === LOCK_LENGTH) lockSubmit();
+  }
+
+  async function lockSubmit() {
+    const L = lockState;
+    const code = L.typed;
+    L.typed = '';
+    if (L.mode === 'new') {
+      Object.assign(L, { mode: 'confirm', first: code, note: '' });
+      renderLock();
+    } else if (L.mode === 'confirm') {
+      if (code !== L.first) {
+        Object.assign(L, { mode: 'new', first: '', note: 'They didn’t match. Try again.' });
+        renderLock();
+        return;
+      }
+      L.busy = true;
+      const old = lockSaved();
+      const salt = toHex(crypto.getRandomValues(new Uint8Array(16)));
+      const hash = await lockHash(code, salt, LOCK_ROUNDS);
+      store.set('lock', JSON.stringify({ salt, hash, rounds: LOCK_ROUNDS, after: old ? old.after : 1 }));
+      const worked = !!lockSaved();
+      closeLock();
+      toast(worked ? '🔒 Passcode ' + (old ? 'changed' : 'set') : 'Couldn’t save the passcode on this device.', !worked);
+    } else {
+      L.busy = true;
+      const saved = lockSaved();
+      const right = await lockHash(code, saved.salt, saved.rounds) === saved.hash;
+      L.busy = false;
+      if (!right) {
+        const n = lockFails().n + 1;
+        const over = n - LOCK_TRIES;
+        store.set('lock-fails', JSON.stringify({ n, until: over >= 0 ? Date.now() + Math.min(LOCK_WAIT * Math.pow(2, over), LOCK_WAIT_MAX) : 0 }));
+        L.note = over < 0 ? 'Wrong passcode. ' + -over + (over === -1 ? ' try' : ' tries') + ' left.' : '';
+        renderLock();
+        return;
+      }
+      store.set('lock-fails', '');
+      if (L.then === 'change') {
+        Object.assign(L, { mode: 'new', then: '', note: '' });
+        renderLock();
+      } else if (L.then === 'off') {
+        ['lock', 'lock-left'].forEach(k => store.set(k, ''));
+        closeLock();
+        toast('App lock turned off');
+      } else closeLock();
+    }
+  }
+
+  /** Forgetting the passcode must not be a way in: a phone is signed out and has to be paired again. */
+  function lockForgot() {
+    if (window.__trackerForget) {
+      if (confirm('This signs this phone out. To use the app again you’ll need a new pairing code from Settings ▸ Install on iPhone on the other phone or the Google link, and you’ll choose your wallet again.')) window.__trackerForget();
+      return;
+    }
+    const typed = prompt('To remove the passcode from this browser, type the Google account you’re signed in with.');
+    if (typed === null) return;
+    if (typed.trim().toLowerCase() !== String(state.app.user || '').toLowerCase()) { toast('That isn’t the account signed in here.', true); return; }
+    ['lock', 'lock-left', 'lock-fails'].forEach(k => store.set(k, ''));
+    closeLock();
+  }
+
+  function lockCard() {
+    const saved = lockSaved();
+    const where = window.__PWA__ ? 'this phone' : 'this browser';
+    const head = `<div class="card-head"><h2>🔒 App lock</h2>${saved ? '<span class="tag good">On</span>' : ''}</div>`;
+    if (!(window.crypto && crypto.subtle)) return head + `<p class="muted small" style="margin:0">App lock can’t be used in ${where}.</p>`;
+    if (!saved) {
+      return head + `<p class="muted small" style="margin-top:0">Ask for a ${LOCK_LENGTH}-digit passcode when the app opens. It’s kept on ${where} only, so each of you sets your own on each phone.</p>
+        <button class="btn primary" data-act="lock-set">Set passcode</button>`;
+    }
+    return head + `<label class="field"><span>Ask for the passcode</span><select data-change="lock-after">${LOCK_TIMES.map(([v, l]) => `<option value="${v}"${v === saved.after ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
+      <div class="row" style="margin-top:12px"><button class="btn" data-act="lock-now">Lock now</button><button class="btn" data-act="lock-change">Change passcode</button><button class="btn danger" data-act="lock-off">Turn off</button></div>
+      <p class="muted small" style="margin-bottom:0">Notifications still appear on your lock screen. To hide their text, use iPhone Settings ▸ Notifications ▸ ZR &amp; YC ▸ Show Previews.</p>`;
+  }
+
+  /** Leaving the app: cover it straight away, so the app switcher doesn't show your balances. */
+  function lockLeave() {
+    if (lockState.mode || !lockSaved()) return; // already locked: leaving mustn't restart the timer
+    store.set('lock-left', Date.now());
+    openLock('curtain');
+  }
+
+  function lockReturn() {
+    if (document.hidden || lockState.mode !== 'curtain') return;
+    if (lockExpired()) openLock('unlock');
+    else closeLock();
+  }
+
+  document.addEventListener('visibilitychange', () => { if (document.hidden) lockLeave(); else lockReturn(); });
+  window.addEventListener('pagehide', lockLeave);
+  window.addEventListener('pageshow', lockReturn);
+
+  // ======================================================================
   // Events
   // ======================================================================
 
@@ -2765,6 +2939,13 @@
       render();
       window.scrollTo(0, 0);
     } else if (act === 'close') closeModal();
+    else if (act === 'lock-key') lockKey(key);
+    else if (act === 'lock-set') openLock('new');
+    else if (act === 'lock-now') openLock('unlock');
+    else if (act === 'lock-change') openLock('check', 'change');
+    else if (act === 'lock-off') openLock('check', 'off');
+    else if (act === 'lock-cancel') closeLock();
+    else if (act === 'lock-forgot') lockForgot();
     else if (act === 'wallet-open' || act === 'wallet-back') {
       state.walletId = act === 'wallet-open' ? key : null;
       render();
@@ -2993,6 +3174,14 @@
   });
 
   document.addEventListener('keydown', e => {
+    if (lockState.mode) {
+      // The lock takes every key, so nothing reaches the page behind it.
+      const k = /^[0-9]$/.test(e.key) ? e.key : e.key === 'Backspace' ? '⌫' : '';
+      if (k) lockKey(k);
+      else if (e.key === 'Escape' && lockState.mode !== 'unlock' && lockState.mode !== 'curtain') closeLock();
+      if (e.key !== 'Tab') e.preventDefault();
+      return;
+    }
     // On a computer, type amounts straight into the keypad.
     const tag = (document.activeElement || {}).tagName || '';
     if (state.form && state.form.calc && $('#calc-value') && ['INPUT', 'TEXTAREA', 'SELECT'].indexOf(tag) < 0) {
@@ -3027,7 +3216,10 @@
       renderForm();
       return;
     }
-    if (el.id === 'f-month') {
+    if (what === 'lock-after') {
+      store.set('lock', JSON.stringify(Object.assign(lockSaved(), { after: Number(el.value) })));
+      toast('✓ Saved');
+    } else if (el.id === 'f-month') {
       state.month = el.value;
       state.fy = E.fyOf(el.value + '-01');
       state.cat = '';
@@ -3118,6 +3310,8 @@
   };
 
   // ---------- start ----------
+
+  if (lockSaved() && lockExpired()) openLock('unlock'); // before anything is drawn
 
   if (BOOT.error || !BOOT.data) {
     $view.innerHTML = `<section class="card">${empty('🔌', `<strong>Can’t load the tracker</strong><br>${esc(BOOT.error || 'No data.')}`)}
