@@ -201,7 +201,7 @@ function startWidget(d, size, family) {
   const p = palette(d, !!picture);
   if (picture) w.backgroundImage = picture; else w.backgroundColor = p.bg;
   textShadow = !!picture;
-  w.url = d.url;
+  w.url = tapUrl;
   w.refreshAfterDate = new Date(Date.now() + REFRESH_MINUTES * 60000);
   return { w, p };
 }
@@ -298,7 +298,7 @@ function drawSmall(d, stale, family) {
 // Lock Screen widgets: just the budget left.
 function drawAccessory(d, family) {
   const w = new ListWidget();
-  w.url = d.url;
+  w.url = tapUrl;
   w.refreshAfterDate = new Date(Date.now() + REFRESH_MINUTES * 60000);
   const left = money(d.budgetLeft, d.cur, true) + ' left';
   if (family === 'accessoryInline') { w.addText(left); return w; }
@@ -324,20 +324,29 @@ function drawMessage(text) {
   return w;
 }
 
-async function build(family) {
+// A tap opens Scriptable and runs this script for the tapped widget (its size and Parameter), which shows it with
+// the latest numbers. Not Safari: an iPhone can't open the Home Screen app from a widget anyway.
+let tapUrl = '';
+
+async function build(family, param) {
   const accessory = /^accessory/.test(family || '');
   const size = family === 'small' || accessory ? 's' : 'm'; // large shows the medium layout
-  const state = await load(size, String(args.widgetParameter || '').trim());
+  tapUrl = URLScheme.forRunningScript() + '?size=' + size + (param ? '&p=' + encodeURIComponent(param) : '');
+  const state = await load(size, param);
   if (!state.data) return drawMessage(state.message);
   const stale = !!state.stale && Date.now() - (state.data.at || 0) > 3600000;
   if (accessory) return drawAccessory(state.data, family);
   return size === 's' ? drawSmall(state.data, stale, 'small') : drawWide(state.data, stale, 'medium');
 }
 
+const query = args.queryParameters || {};
 if (config.runsInWidget) {
-  Script.setWidget(await build(config.widgetFamily));
-} else { // opened in Scriptable: show both
-  await (await build('medium')).presentMedium();
-  await (await build('small')).presentSmall();
+  Script.setWidget(await build(config.widgetFamily, String(args.widgetParameter || '').trim()));
+} else if (query.size) { // a widget was tapped: show that one, freshly loaded
+  const w = await build(query.size === 's' ? 'small' : 'medium', String(query.p || '').trim());
+  if (query.size === 's') await w.presentSmall(); else await w.presentMedium();
+} else { // opened in Scriptable itself: show both
+  await (await build('medium', '')).presentMedium();
+  await (await build('small', '')).presentSmall();
 }
 Script.complete();
