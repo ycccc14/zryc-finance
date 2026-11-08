@@ -629,6 +629,31 @@
   @media (prefers-color-scheme: dark) { .lock-keys button { background: rgba(255, 255, 255, .1); } .lock-keys button:active { background: rgba(255, 255, 255, .2); } }
   /* Phones show only what's needed day to day. */
   @media (max-width: 699px) { .hide-phone { display: none !important; } }
+  /* Home Screen widget preview: the same layout the iPhone draws (widget/scriptable.js). */
+  .wstage { display: grid; justify-items: center; gap: 8px; padding: 16px 0 10px; }
+  .wprev { border-radius: 22px; box-shadow: 0 6px 20px rgba(0, 0, 0, .18); overflow: hidden; display: flex; flex-direction: column; font-family: -apple-system, system-ui, sans-serif; max-width: 100%; }
+  @media (prefers-color-scheme: dark) { .wprev { box-shadow: 0 0 0 1px rgba(255, 255, 255, .1), 0 6px 20px rgba(0, 0, 0, .4); } }
+  .wprev.s { padding: 16px; }
+  .wprev.m { padding: 12px 14px; }
+  .wp-head { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font-size: 15px; white-space: nowrap; }
+  .wp-head > span { overflow: hidden; text-overflow: ellipsis; }
+  .wprev.m .wp-head { font-size: 14px; }
+  .wp-big { margin-top: auto; font-size: 23px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -.01em; }
+  .wp-bar { height: 12px; border-radius: 6px; margin-top: 10px; overflow: hidden; }
+  .wp-bar span { display: block; height: 100%; border-radius: 6px; }
+  .wp-foot { margin-top: auto; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wp-cols { margin: auto 0; display: grid; grid-template-columns: repeat(3, 1fr); }
+  .wp-col { display: grid; justify-items: center; gap: 1px; min-width: 0; }
+  .wp-col { position: relative; }
+  .wp-ring { width: 58px; height: 58px; border-radius: 50%; margin-bottom: 5px; background: conic-gradient(var(--c) var(--p), var(--t) 0);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5.5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5.5px)); }
+  .wp-icon { position: absolute; top: 0; left: 50%; width: 58px; height: 58px; margin-left: -29px; display: grid; place-items: center; font-size: 21px; }
+  .wp-label { font-size: 12px; font-weight: 500; }
+  .wp-amt { font-size: 15px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 2px; }
+  .wswatches { display: flex; flex-wrap: wrap; gap: 8px; }
+  .wswatches button { width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--card); box-shadow: 0 0 0 1px var(--line); cursor: pointer; color: #fff; font-size: 13px; text-shadow: 0 1px 2px rgba(0, 0, 0, .5); }
+  .wswatches button[aria-pressed=true] { box-shadow: 0 0 0 2px var(--ink); }
+  .wsteps { padding-left: 20px; margin: 6px 0 12px; display: grid; gap: 5px; }
 </style>
 
   <style>
@@ -659,8 +684,8 @@
   <div id="lock" class="lock" hidden></div>
   <div id="pair" hidden></div>
   <script src="vendor/chart.umd.js"></script>
-  <script src="engine.js?v=8772eeca43"></script>
-  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = '8772eeca43';</script>
-  <script src="boot.js?v=8772eeca43"></script>
+  <script src="engine.js?v=ea92828371"></script>
+  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = 'ea92828371';</script>
+  <script src="boot.js?v=ea92828371"></script>
 </body>
 </html>

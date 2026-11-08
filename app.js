@@ -321,15 +321,8 @@
   }
 
   /** Everyday budget: this month's pay put into the Everyday Account's funds, and what was spent from them. */
-  function budgetFor(k, m) {
-    const M = state.M;
-    let funds = fundsIn('Everyday Account');
-    if (!funds.length) funds = M.fundNames.indexOf('Living Expenses') >= 0 ? ['Living Expenses'] : M.fundNames.slice(0, 1);
-    const mb = M.monthly[m];
-    const budget = mb ? sumOf(funds, f => mb.by[k].alloc[f]) : 0;
-    const spent = sumOf(M.expenses.filter(r => r.month === m && funds.indexOf(r.fund) >= 0), r => (k === 'All' ? r.amount : r.shares[k] || 0));
-    return { funds, budget, spent, left: budget - spent, used: budget > 0 ? spent / budget : (spent > 0 ? 1 : 0) };
-  }
+  // Worked out in Engine.gs, so the Home Screen widgets show exactly the same numbers.
+  const budgetFor = (k, m) => E.monthSummary(state.M, k, m).budget;
 
   function fySelect(value, change) {
     const fys = state.M.fys.slice().reverse();
@@ -462,11 +455,7 @@
     const M = state.M;
     const m = state.month;
     const sel = state.person;
-    const mb = M.monthly[m];
-    const spent = mb ? mb.spend[sel] : 0;
-    const income = mb ? mb.by[sel].net + (mb.interest[sel] || 0) : 0;
-    const left = income - spent;
-    const b = budgetFor(sel, m);
+    const { spent, income, left, budget: b } = E.monthSummary(M, sel, m);
     const L = M.ledgers[sel];
 
     const summary = `<section class="card summary">
@@ -1425,6 +1414,7 @@
     state.after.push(renderImporter);
     state.after.push(() => renderPush(null));
     state.after.push(() => renderInstall(null));
+    state.after.push(() => renderWidget(widgetState.status)); // asks the server only the first time
     if (!window.__PWA__) state.after.push(() => renderLog(null));
     return `
       <div class="section-title"><h1>Settings</h1></div>
@@ -1443,6 +1433,8 @@
       <section class="card" id="install-card"></section>
 
       <section class="card" id="push-card"></section>
+
+      <section class="card" id="widget-card"></section>
 
       <section class="card"><div class="card-head"><h2>👥 People</h2></div>
         ${grid('g-people', [
@@ -1627,6 +1619,229 @@
     const sub = await reg.pushManager.getSubscription();
     if (sub) await sub.unsubscribe();
     return call('pushUnsubscribe');
+  }
+
+  // ======================================================================
+  // Home Screen widgets (iPhone, through the free Scriptable app)
+  // ======================================================================
+  // Widget.gs keeps each phone's looks and works out the numbers on every widget refresh; widget/scriptable.js
+  // draws them on the iPhone. The preview here uses the same calculation (Engine.monthSummary).
+
+  const SCRIPTABLE_APP = 'https://apps.apple.com/app/scriptable/id1405459188';
+  const WIDGET_BACKS = [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark'], ['colour', 'Colour'], ['picture', 'Picture']];
+  const WIDGET_COLOURS = ['#F2B705', '#F97316', '#EF4444', '#EC4899', '#D9A8F0', '#A855F7', '#3B82F6', '#14B8A6', '#16A34A', '#0F172A'];
+  const WIDGET_PIC_BYTES = 36000; // as base64 this still fits one Sheet cell (Widget.gs)
+  const widgetState = { status: null, size: 's', script: '', seq: 0 };
+
+  function loadWidgetScript() {
+    if (widgetState.script || !window.__PWA__) return;
+    fetch('widget/scriptable.js?v=' + encodeURIComponent(window.__BUILD__ || ''))
+      .then(r => (r.ok ? r.text() : '')).then(t => { widgetState.script = t; }).catch(() => {});
+  }
+
+  // Apple's widget sizes for this screen width (points), so the preview is the real size.
+  function widgetBox(size) {
+    const row = [[428, 170, 364], [414, 169, 360], [390, 158, 338], [375, 155, 329], [0, 141, 292]].find(r => Math.min(window.innerWidth, 430) >= r[0]);
+    return size === 's' ? [row[1], row[1]] : [row[2], row[1]];
+  }
+
+  const widgetMoney = (v, short) => {
+    const n = Math.abs(Number(v) || 0);
+    const sign = v < -0.004 ? '−' : '';
+    if (short && n >= 1000) return sign + '$' + (n >= 1e6 ? (n / 1e6).toFixed(1) + 'm' : (n / 1e3).toFixed(1) + 'k');
+    return sign + '$' + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  };
+  const lightColour = c => {
+    const h = String(c || '').replace('#', '');
+    if (h.length !== 6) return false;
+    return 0.299 * parseInt(h.slice(0, 2), 16) + 0.587 * parseInt(h.slice(2, 4), 16) + 0.114 * parseInt(h.slice(4, 6), 16) > 165;
+  };
+
+  /** The same picture the iPhone draws (widget/scriptable.js), in HTML. */
+  function widgetPreview(size, look, picture) {
+    const M = state.M;
+    const m = M.today.slice(0, 7);
+    const who = look.who;
+    const s = E.monthSummary(M, who, m);
+    const accent = look.color || (who !== 'All' && pColour(who)) || '#F2B705';
+    const dark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+    const back = look.back === 'picture' && !picture ? 'dark' : look.back;
+    const onDark = back === 'dark' || back === 'picture' || (back === 'auto' && dark);
+    let ink = onDark ? '#FFFFFF' : '#1E2A3A';
+    let soft = onDark ? 'rgba(255,255,255,.75)' : '#667085';
+    let track = onDark ? 'rgba(255,255,255,.18)' : 'rgba(0,0,0,.08)';
+    let rings = onDark ? ['#4ADE80', '#FF8A8A', accent] : ['#16A34A', '#E5484D', accent];
+    let bar = accent;
+    let bad = onDark ? '#FF8A8A' : '#D33A3A';
+    let bg = onDark ? '#1C1C1E' : '#FFFFFF';
+    if (back === 'picture') { track = 'rgba(255,255,255,.3)'; rings = ['#FFFFFF', '#FFFFFF', '#FFFFFF']; }
+    if (back === 'colour') {
+      ink = lightColour(accent) ? '#1E2A3A' : '#FFFFFF';
+      soft = ink === '#FFFFFF' ? 'rgba(255,255,255,.75)' : 'rgba(30,42,58,.75)';
+      track = ink === '#FFFFFF' ? 'rgba(255,255,255,.25)' : 'rgba(30,42,58,.2)';
+      rings = [ink, ink, ink];
+      bar = ink;
+      bad = ink;
+      bg = accent;
+    }
+    const [w, h] = widgetBox(size);
+    const bgCss = back === 'picture' ? `background:linear-gradient(rgba(0,0,0,.32),rgba(0,0,0,.32)),url('${picture}') center/cover` : `background:${bg}`;
+    // Real size, or a little smaller where the card is narrower than the widget (medium on smaller iPhones).
+    const box = `class="wprev ${size}" style="width:min(${w}px,100%);aspect-ratio:${w}/${h};${bgCss};color:${ink}" role="img"`;
+    const name = who === 'All' ? 'Both of us' : pName(who);
+    if (size === 's') {
+      const b = s.budget;
+      const none = !(b.budget > 0) && !(b.spent > 0);
+      const part = b.budget > 0 ? Math.min(1, Math.max(0, b.spent) / b.budget) : b.spent > 0 ? 1 : 0;
+      const over = b.left < -0.004;
+      const label = who === 'All' ? 'Budget' : pName(who) + '’s budget';
+      return `<div ${box} aria-label="${esc(label)}: ${esc(widgetMoney(b.left))} left">
+        <div class="wp-head"><span style="color:${soft}">${esc(label)}</span><b>${esc(monthLong(m).slice(0, 3))}</b></div>
+        <div class="wp-big" style="${over ? 'color:' + bad + ';' : ''}${none ? 'font-size:19px' : ''}">${none ? 'No budget yet' : esc(widgetMoney(b.left, look.short)) + ' left'}</div>
+        <div class="wp-bar" style="background:${track}">${part > 0 ? `<span style="width:${Math.max(8, part * 100).toFixed(1)}%;background:${over ? bad : bar}"></span>` : ''}</div>
+        <div class="wp-foot" style="color:${soft}">${none ? 'Add this month’s pay' : esc(widgetMoney(b.spent, look.short)) + ' of ' + esc(widgetMoney(b.budget, look.short))}</div></div>`;
+    }
+    const income = Math.max(0, s.income);
+    const share = v => (income > 0 ? Math.max(0, v) / income : v > 0 ? 1 : 0);
+    const cols = [['Income', '💼', s.income, income > 0 ? 1 : 0], ['Expenses', '🛒', s.spent, share(s.spent)], ['Remaining', '💵', s.left, share(s.left)]];
+    return `<div ${box} aria-label="${esc(monthLong(m))}: income ${esc(widgetMoney(s.income))}, expenses ${esc(widgetMoney(s.spent))}, remaining ${esc(widgetMoney(s.left))}">
+      <div class="wp-head"><b>${esc(monthLong(m))}</b><span style="color:${soft};font-size:12px">${esc(name)}</span></div>
+      <div class="wp-cols">${cols.map(([label, icon, v, part], i) => `<div class="wp-col">
+        <div class="wp-ring" style="--p:${(Math.min(1, part) * 360).toFixed(1)}deg;--c:${rings[i]};--t:${track}"></div><span class="wp-icon" aria-hidden="true">${icon}</span>
+        <span class="wp-label" style="color:${soft}">${label}</span>
+        <b class="wp-amt" style="${i === 2 && v < -0.004 ? 'color:' + bad : ''}">${esc(widgetMoney(v, look.short))}</b></div>`).join('')}</div></div>`;
+  }
+
+  function renderWidget(status) {
+    const el = $('#widget-card');
+    if (!el) return;
+    const head = on => `<div class="card-head"><h2>📱 Home Screen widgets</h2>${on === undefined ? '' : `<span class="tag ${on ? 'good' : ''}">${on ? 'On for this phone' : 'Off'}</span>`}</div>`;
+    const what = `<p class="small" style="margin-top:0"><strong>Small:</strong> this month’s everyday budget left (pay put into the Everyday Account, minus what was spent from it). <strong>Medium:</strong> this month’s income, expenses and what’s left. The numbers come from the server each time the widget refreshes, so they include the other person’s new entries.</p>`;
+    if (!window.__PWA__) {
+      el.innerHTML = head() + what + '<p class="small">Set them up <strong>on each iPhone</strong>: open the <strong>ZR &amp; YC</strong> app from the Home Screen ▸ Me ▸ Settings ▸ Home Screen widgets.</p>';
+      return;
+    }
+    if (!status) {
+      el.innerHTML = head() + '<p class="muted">Checking…</p>';
+      call('widgetStatus').then(renderWidget).catch(err => { el.innerHTML = head() + `<p class="flag">${esc(errText(err))}</p>`; });
+      return;
+    }
+    widgetState.status = status;
+    if (!status.on) {
+      el.innerHTML = head(false) + what + `<p class="muted small">Anyone who sees your Home Screen sees these numbers.</p>
+        <button class="btn primary" data-act="widget-on" style="margin-top:6px">📱 Turn on for this phone</button>`;
+      return;
+    }
+    loadWidgetScript();
+    const size = widgetState.size;
+    const look = status[size];
+    const picture = status.pics[size];
+    const seen = status.seen && status.seen[size];
+    const pressed = (a, b) => `aria-pressed="${a === b}"`;
+    const seg = (act, options, value) => `<div class="seg">${options.map(([v, label]) => `<button type="button" data-act="${act}" data-key="${esc(v)}" ${pressed(v, value)}>${esc(label)}</button>`).join('')}</div>`;
+    const people = [['All', 'Both of us']].concat(state.M.codes.map(c => [c, pName(c)]));
+    const swatches = [['', look.who === 'All' ? '#F2B705' : pColour(look.who), 'Their own colour']].concat(WIDGET_COLOURS.map(c => [c, c, c]));
+    el.innerHTML = head(true) + what + `
+      ${seg('widget-size', [['s', 'Small · budget'], ['m', 'Medium · this month']], size)}
+      <div class="wstage">${widgetPreview(size, look, picture)}<span class="muted small">Preview${seen ? ' · last refreshed on the Home Screen ' + new Date(seen).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''}</span></div>
+      <div class="field"><span>Numbers for</span>${seg('widget-who', people, look.who)}</div>
+      <div class="field" style="margin-top:10px"><span>Background</span>${seg('widget-back', WIDGET_BACKS, look.back)}</div>
+      ${look.back === 'picture' ? `<div class="row" style="margin-top:8px"><button class="btn" data-act="widget-pick">🖼️ ${picture ? 'Change picture' : 'Choose a picture'}</button>${picture ? '<button class="btn link danger" data-act="widget-pic-clear">Remove</button>' : ''}</div>` : ''}
+      <div class="field" style="margin-top:10px"><span>Colour${look.back === 'colour' ? '' : ' (bar and ring)'}</span><div class="wswatches">${swatches.map(([v, c, label]) => `<button type="button" data-act="widget-color" data-key="${esc(v)}" aria-label="${esc(label)}" aria-pressed="${look.color === v}" style="background:${esc(c)}">${v ? '' : '★'}</button>`).join('')}</div></div>
+      <label class="spread" style="margin-top:12px"><span>Short amounts ($4.7k)</span><input type="checkbox" data-change="widget-short"${look.short ? ' checked' : ''}></label>
+      <h3 style="margin-top:16px">Put it on your iPhone (once)</h3>
+      <ol class="small wsteps">
+        <li>Get the free app <a href="${SCRIPTABLE_APP}" target="_blank" rel="noopener">Scriptable</a> from the App Store.</li>
+        <li>Tap <strong>Copy script</strong> below.</li>
+        <li>Open Scriptable, tap <strong>＋</strong>, paste, tap the title and name it <strong>ZR &amp; YC</strong>, then <strong>Done</strong>.</li>
+        <li>Touch and hold your Home Screen ▸ <strong>Edit ▸ Add Widget</strong> ▸ <strong>Scriptable</strong>. Pick the small or medium size ▸ <strong>Add Widget</strong>.</li>
+        <li>Touch and hold the new widget ▸ <strong>Edit Widget</strong> ▸ <strong>Script</strong>: <strong>ZR &amp; YC</strong>. Add both sizes if you like.</li></ol>
+      <button class="btn primary" data-act="widget-copy" style="width:100%">📋 Copy script</button>
+      <textarea id="widget-script" class="sr" readonly aria-hidden="true" tabindex="-1"></textarea>
+      <p class="muted small">Changes here reach the widget at its next refresh: no need to copy the script again. iPhone decides when widgets refresh (usually every 5–15 minutes); opening the widget’s script in Scriptable refreshes it straight away. To show someone else’s numbers on one widget, type <strong>ZR</strong>, <strong>YC</strong> or <strong>Both</strong> under <strong>Parameter</strong> in Edit Widget. Tapping the widget opens ZR &amp; YC in Safari (iPhones can’t open a Home Screen app from a widget).</p>
+      <p class="muted small" style="margin-bottom:0">🔒 The script holds a key that can only read these totals, never your entries. Keep it to yourself; <button class="btn link danger" data-act="widget-off" style="padding:0;min-height:0">turn widgets off</button> to stop it working.</p>`;
+  }
+
+  /** Saves one widget's look; the card shows it straight away. */
+  function widgetSaveLook(change) {
+    const st = widgetState.status;
+    const size = widgetState.size;
+    st[size] = Object.assign({}, st[size], change);
+    renderWidget(st);
+    const seq = ++widgetState.seq; // quick taps: only the last answer is shown
+    call('widgetSave', size, st[size]).then(fresh => { if (seq === widgetState.seq) { fresh.pics = fresh.pics || widgetState.status.pics; renderWidget(fresh); } })
+      .catch(err => { toast(errText(err), true); renderWidget(null); });
+  }
+
+  // A chosen photo, cut to the widget's shape and shrunk until it fits one Sheet cell.
+  function widgetPicture(file, size) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const [bw, bh] = size === 's' ? [1, 1] : [364, 170];
+        const iw = img.naturalWidth;
+        const ih = img.naturalHeight;
+        const zoom = Math.max(bw / iw, bh / ih);
+        const cw = bw / zoom;
+        const ch = bh / zoom;
+        const cv = document.createElement('canvas');
+        for (let side = size === 's' ? 510 : 1092; side >= 240; side = Math.round(side * 0.8)) {
+          cv.width = side;
+          cv.height = Math.round(side * bh / bw);
+          cv.getContext('2d').drawImage(img, (iw - cw) / 2, (ih - ch) / 2, cw, ch, 0, 0, cv.width, cv.height);
+          for (let q = 0.8; q >= 0.4; q -= 0.1) {
+            const url = cv.toDataURL('image/jpeg', q);
+            if ((url.length - 23) * 0.75 <= WIDGET_PIC_BYTES) { resolve(url); return; }
+          }
+        }
+        reject(new Error('That picture is too big. Try another one.'));
+      };
+      img.onerror = () => reject(new Error('That picture couldn’t be opened. Try another one.'));
+      const reader = new FileReader(); // a data: link, not blob:, so it works everywhere
+      reader.onload = () => { img.src = reader.result; };
+      reader.onerror = () => reject(new Error('That picture couldn’t be opened. Try another one.'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // One file input for the whole app, outside the page. Choosing a photo sends the app to the background and the page
+  // may be redrawn meanwhile; an input that was redrawn away would never report the photo.
+  const widgetFile = Object.assign(document.createElement('input'), { type: 'file', accept: 'image/*', id: 'widget-file' });
+  widgetFile.style.cssText = 'position:fixed;left:-100px;top:0;width:1px;height:1px;opacity:0';
+  document.body.appendChild(widgetFile);
+  let widgetFileFor = 's';
+  widgetFile.addEventListener('change', async () => {
+    const file = widgetFile.files[0];
+    widgetFile.value = ''; // the same photo again still counts as a choice
+    if (!file) return;
+    const size = widgetFileFor;
+    try {
+      const url = await widgetPicture(file, size);
+      toast('Saving picture…');
+      const st = await call('widgetPicture', size, url);
+      renderWidget(st);
+      toast('✓ Picture saved');
+    } catch (err) {
+      toast(errText(err), true);
+    }
+  });
+
+  function widgetCopy() {
+    const st = widgetState.status;
+    if (!widgetState.script) { loadWidgetScript(); toast('Still loading the script. Tap again in a moment.'); return; }
+    const text = widgetState.script.replace('__WIDGET_CODE__', 'ZRW1|' + window.__API__ + '|' + st.token);
+    const fallback = () => { // select it so iOS offers Copy
+      const ta = $('#widget-script');
+      ta.value = text;
+      ta.className = '';
+      ta.style.cssText = 'width:100%;height:120px;font:12px ui-monospace,monospace;margin-top:8px';
+      ta.removeAttribute('aria-hidden');
+      ta.focus();
+      ta.select();
+      toast('Couldn’t copy by itself: tap and hold the text, then Copy.', true);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => toast('✓ Script copied. Now paste it in Scriptable.'), fallback);
+    else fallback();
   }
 
   function updateAllocTotals() {
@@ -2651,7 +2866,7 @@
     if (btn && !silent) btn.style.opacity = '.5';
     if (!loading) {
       const edits = localEdits;
-      loading = call('getAppData').then(app => { loading = null; useLatest(app, edits); }, err => { loading = null; throw err; });
+      loading = call('getAppData', !silent).then(app => { loading = null; useLatest(app, edits); }, err => { loading = null; throw err; });
     }
     return loading.then(() => {
       if (silent) return;
@@ -2705,9 +2920,12 @@
     if (checking || loading || pendingSaves > 0 || document.hidden || !state.M) return;
     checking = true;
     try {
-      const ver = await call('dataVersion');
-      if (ver !== state.app.ver) await reload(true);
-      else {
+      // One request: "nothing new" (null) or, when something changed, all of it straight away.
+      const edits = localEdits;
+      const app = await call('appDataIfChanged', state.app.ver);
+      if (app) {
+        if (!loading) useLatest(app, edits);
+      } else {
         state.loadedAt = Date.now(); // checked: nothing new
         const pill = $('.sync-pill span');
         if (pill) pill.textContent = loadedTime();
@@ -2721,7 +2939,7 @@
 
   window.__trackerReload = reload;
   window.__trackerCheck = checkForUpdates; // the iPhone app calls this when a notification arrives
-  const CHECK_EVERY = 3000;
+  const CHECK_EVERY = 2000;
   const CHECK_IDLE = 15000;
   const IDLE_AFTER = 5 * 60 * 1000;
   let lastUsed = Date.now();
@@ -3068,6 +3286,26 @@
       call('pushTest').then(r => { el.disabled = false; toast('✓ Test sent to ' + r.sent + (r.sent === 1 ? ' phone' : ' phones')); })
         .catch(err => { el.disabled = false; toast(errText(err), true); });
     }
+    else if (act === 'widget-on' || act === 'widget-off') {
+      if (act === 'widget-off' && !confirm('Turn widgets off on this phone? Its widgets stop showing numbers, and the script has to be copied again if you turn them back on.')) return;
+      el.disabled = true;
+      call(act === 'widget-on' ? 'widgetOn' : 'widgetOff').then(st => { renderWidget(st); toast(st.on ? '📱 Widgets on. Now copy the script.' : 'Widgets off'); })
+        .catch(err => { el.disabled = false; toast(errText(err), true); });
+    } else if (act === 'widget-size') {
+      widgetState.size = key;
+      renderWidget(widgetState.status);
+    } else if (act === 'widget-who') widgetSaveLook({ who: key });
+    else if (act === 'widget-back') {
+      widgetSaveLook({ back: key });
+      if (key === 'picture' && !widgetState.status.pics[widgetState.size]) { widgetFileFor = widgetState.size; widgetFile.click(); }
+    } else if (act === 'widget-color') widgetSaveLook({ color: key });
+    else if (act === 'widget-pick') {
+      widgetFileFor = widgetState.size;
+      widgetFile.click();
+    } else if (act === 'widget-pic-clear') {
+      el.disabled = true;
+      call('widgetPicture', widgetState.size, '').then(st => { renderWidget(st); toast('Picture removed'); }).catch(err => { el.disabled = false; toast(errText(err), true); });
+    } else if (act === 'widget-copy') widgetCopy();
     else if (act === 'go-import') {
       state.view = 'settings';
       store.set('last-me', 'settings');
@@ -3214,6 +3452,10 @@
       // Interest on the joint account belongs to both; personal accounts to one person.
       if (el.name === 'account') r.person = /shared/i.test(el.value) ? 'Shared' : (r.person === 'Shared' ? state.M.codes[0] : r.person);
       renderForm();
+      return;
+    }
+    if (what === 'widget-short') {
+      widgetSaveLook({ short: el.checked });
       return;
     }
     if (what === 'lock-after') {

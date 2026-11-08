@@ -824,8 +824,30 @@ function TrackerEngine() {
     };
   }
 
+  /**
+   * One month for one person (or ALL), as the Home page and the Home Screen widgets show it:
+   * money in (net pay + interest), spent, left, and the everyday budget (this month's pay put into the
+   * Everyday Account's funds, and what was spent from them).
+   */
+  function monthSummary(M, k, m) {
+    const mb = M.monthly[m];
+    const sum = (list, f) => list.reduce((s, x) => s + f(x), 0);
+    const spent = mb ? mb.spend[k] || 0 : 0;
+    const income = mb && mb.by[k] ? mb.by[k].net + (mb.interest[k] || 0) : 0;
+    const account = {};
+    M.funds.forEach(f => { account[f.name] = f.account; });
+    let funds = M.fundNames.filter(f => account[f] === 'Everyday Account');
+    if (!funds.length) funds = M.fundNames.indexOf('Living Expenses') >= 0 ? ['Living Expenses'] : M.fundNames.slice(0, 1);
+    const budget = mb && mb.by[k] ? sum(funds, f => mb.by[k].alloc[f] || 0) : 0;
+    const used = sum(M.expenses.filter(r => r.month === m && funds.indexOf(r.fund) >= 0), r => (k === ALL ? r.amount : r.shares[k] || 0));
+    return {
+      income, spent, left: income - spent,
+      budget: { funds, budget, spent: used, left: budget - used, used: budget > 0 ? used / budget : (used > 0 ? 1 : 0) },
+    };
+  }
+
   return {
-    compute, settingsOf, withhold, annualTax, autoScale, scaleFor, walletTransfer, walletMonth, WALLET_TYPES, FEE_CATEGORY,
+    compute, monthSummary, settingsOf, withhold, annualTax, autoScale, scaleFor, walletTransfer, walletMonth, WALLET_TYPES, FEE_CATEGORY,
     fyOf, fyMonths, fyName, normFy, monthOf, weekStart, addDays, addMonths, monthRange, todayISO,
     isBlank, num, pct, round2,
     ALL, SHARED, RESIDENT, FOREIGN, WHM,
