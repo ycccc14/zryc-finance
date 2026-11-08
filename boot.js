@@ -33,7 +33,7 @@
   window.__trackerForget = function () {
     var token = store.get(TOKEN) || '';
     var done = function () {
-      [TOKEN, CACHE, 'tracker.lock', 'tracker.lock-left', 'tracker.lock-fails'].forEach(function (k) { store.del(k); });
+      [TOKEN, CACHE, 'tracker.lock', 'tracker.lock-left', 'tracker.lock-fails', 'tracker.lock-bio'].forEach(function (k) { store.del(k); });
       idbSet('token', null);
       location.reload();
     };

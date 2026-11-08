@@ -166,12 +166,20 @@ function ringImage(part, color, track, side, width) {
   return ctx.getImage();
 }
 
+// On a picture every word gets a soft dark shadow, so it stays readable over bright parts of the photo.
+let textShadow = false;
+
 function addText(stack, text, font, color, opts) {
   const t = stack.addText(String(text));
   t.font = font;
   t.textColor = color;
   t.lineLimit = 1;
   t.minimumScaleFactor = (opts && opts.shrink) || 0.75;
+  if (textShadow) {
+    t.shadowColor = new Color('#000000', 0.6);
+    t.shadowRadius = 3;
+    t.shadowOffset = new Point(0, 1);
+  }
   return t;
 }
 
@@ -191,6 +199,7 @@ function startWidget(d, size, family) {
   const picture = d.back === 'picture' ? pictureBackground(size, family) : null;
   const p = palette(d, !!picture);
   if (picture) w.backgroundImage = picture; else w.backgroundColor = p.bg;
+  textShadow = !!picture;
   w.url = d.url;
   w.refreshAfterDate = new Date(Date.now() + REFRESH_MINUTES * 60000);
   return { w, p };

@@ -1688,7 +1688,7 @@
     // .45 = PICTURE_SHADE in widget/scriptable.js: dark enough for white words, also on a Clear or Tinted Home Screen.
     const bgCss = back === 'picture' ? `background:linear-gradient(rgba(0,0,0,.45),rgba(0,0,0,.45)),url('${picture}') center/cover` : `background:${bg}`;
     // Real size, or a little smaller where the card is narrower than the widget (medium on smaller iPhones).
-    const box = `class="wprev ${size}" style="width:min(${w}px,100%);aspect-ratio:${w}/${h};${bgCss};color:${ink}" role="img"`;
+    const box = `class="wprev ${size}${back === 'picture' ? ' pic' : ''}" style="width:min(${w}px,100%);aspect-ratio:${w}/${h};${bgCss};color:${ink}" role="img"`;
     const name = who === 'All' ? 'Both of us' : pName(who);
     if (size === 's') {
       const b = s.budget;
@@ -2974,6 +2974,7 @@
   const LOCK_WAIT_MAX = 15 * 60 * 1000;
   const LOCK_TIMES = [[0, 'Straight away'], [1, 'After 1 minute'], [5, 'After 5 minutes'], [15, 'After 15 minutes']];
   const lockState = { mode: '', then: '', typed: '', first: '', note: '', busy: false };
+  const FACE_ICON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="vertical-align:-4px"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M9 9v1M15 9v1M12 9v4h-1M9 16c1.7 1.3 4.3 1.3 6 0"/></svg>';
   let lockTick;
 
   const lockRead = key => { try { return JSON.parse(store.get(key) || 'null'); } catch (e) { return null; } };
@@ -2999,11 +3000,78 @@
     ['.app', '#nav-bottom', '#modal'].forEach(sel => { const el = $(sel); if (el) el.inert = on; });
   }
 
+  // ---------- Face ID (Touch ID on other devices) ----------
+  // A passkey made on this phone and used only to unlock the app: iPhone asks for Face ID before it signs, and the
+  // app checks that Face ID was really used (the "user verified" flag). Nothing goes to the server. The passcode stays
+  // as the way back in when Face ID fails or the face isn't recognised.
+  const bioSaved = () => lockRead('lock-bio');
+  const BIO_NAME = /iPhone|iPad|iPod/.test(navigator.userAgent) ? 'Face ID' : 'fingerprint or face';
+  let bioOk = null; // can this device do it? (checked once, below)
+  let bioBusy = false;
+  const bioReady = (async () => {
+    try {
+      bioOk = window.self === window.top && !!window.PublicKeyCredential && !!navigator.credentials
+        && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+    } catch (e) {
+      bioOk = false;
+    }
+    const card = $('#lock-card');
+    if (card && !lockState.mode) card.innerHTML = lockCard();
+  })();
+
+  async function bioSetUp() {
+    const cred = await navigator.credentials.create({ publicKey: {
+      rp: { name: 'ZR & YC Finance' },
+      user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'ZR & YC app lock', displayName: 'ZR & YC app lock' },
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' },
+      attestation: 'none',
+      timeout: 60000,
+    } });
+    store.set('lock-bio', JSON.stringify({ id: bytesB64(cred.rawId) }));
+    return !!bioSaved();
+  }
+
+  /** Resolves only if this phone's own passkey signed with Face ID. */
+  async function bioVerify() {
+    const saved = bioSaved();
+    const cred = await navigator.credentials.get({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      allowCredentials: [{ type: 'public-key', id: b64Bytes(saved.id), transports: ['internal'] }],
+      userVerification: 'required',
+      timeout: 60000,
+    } });
+    const flags = new Uint8Array(cred.response.authenticatorData)[32];
+    if (bytesB64(cred.rawId) !== saved.id || !(flags & 4)) throw new Error('Face ID wasn’t confirmed.');
+  }
+
+  /** Unlock with Face ID. `auto`: tried by itself when the lock opens, so a refusal stays quiet (just type the passcode). */
+  async function lockBio(auto) {
+    if (bioOk === null) await bioReady; // the lock can open before the check is done (app start)
+    if (bioBusy || lockState.mode !== 'unlock' || !bioSaved() || !bioOk) return;
+    bioBusy = true;
+    try {
+      await bioVerify();
+      bioBusy = false;
+      if (lockState.mode !== 'unlock') return;
+      store.set('lock-fails', '');
+      closeLock();
+    } catch (err) {
+      bioBusy = false;
+      if (!auto && lockState.mode === 'unlock') {
+        lockState.note = BIO_NAME + ' didn’t unlock it. Type your passcode.';
+        renderLock();
+      }
+    }
+  }
+
   function openLock(mode, then) {
     Object.assign(lockState, { mode, then: then || '', typed: '', first: '', note: '', busy: false });
     $('#lock').hidden = false;
     lockCover(true);
     renderLock();
+    if (mode === 'unlock' && bioSaved()) setTimeout(() => lockBio(true), 60);
   }
 
   function closeLock() {
@@ -3030,6 +3098,7 @@
       <div class="lock-dots" role="img" aria-label="${L.typed.length} of ${LOCK_LENGTH} digits entered">${dots}</div>
       <p class="lock-note" role="status">${wait ? 'Too many tries. Wait ' + Math.ceil(wait / 1000) + ' seconds.' : esc(L.note) || '&nbsp;'}</p>
       <div class="lock-keys">${keys}</div>
+      ${L.mode === 'unlock' && bioSaved() && bioOk !== false ? `<button type="button" class="btn lock-bio" data-act="lock-bio">${FACE_ICON} Use ${BIO_NAME}</button>` : ''}
       ${L.mode === 'unlock' ? '<button type="button" class="btn link" data-act="lock-forgot">Forgot passcode?</button>' : '<button type="button" class="btn link" data-act="lock-cancel">Cancel</button>'}</div>`;
   }
 
@@ -3081,7 +3150,7 @@
         Object.assign(L, { mode: 'new', then: '', note: '' });
         renderLock();
       } else if (L.then === 'off') {
-        ['lock', 'lock-left'].forEach(k => store.set(k, ''));
+        ['lock', 'lock-left', 'lock-bio'].forEach(k => store.set(k, ''));
         closeLock();
         toast('App lock turned off');
       } else closeLock();
@@ -3097,7 +3166,7 @@
     const typed = prompt('To remove the passcode from this browser, type the Google account you’re signed in with.');
     if (typed === null) return;
     if (typed.trim().toLowerCase() !== String(state.app.user || '').toLowerCase()) { toast('That isn’t the account signed in here.', true); return; }
-    ['lock', 'lock-left', 'lock-fails'].forEach(k => store.set(k, ''));
+    ['lock', 'lock-left', 'lock-fails', 'lock-bio'].forEach(k => store.set(k, ''));
     closeLock();
   }
 
@@ -3111,6 +3180,8 @@
         <button class="btn primary" data-act="lock-set">Set passcode</button>`;
     }
     return head + `<label class="field"><span>Ask for the passcode</span><select data-change="lock-after">${LOCK_TIMES.map(([v, l]) => `<option value="${v}"${v === saved.after ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
+      ${bioOk ? `<div class="spread" style="margin-top:12px;gap:10px"><span><strong>${FACE_ICON} Unlock with ${BIO_NAME}</strong><span class="muted small" style="display:block">${bioSaved() ? 'On. The passcode still works when ' + BIO_NAME + ' doesn’t.' : 'The passcode stays as the backup.'}</span></span>
+        ${bioSaved() ? '<button class="btn" data-act="bio-off">Turn off</button>' : '<button class="btn primary" data-act="bio-on">Turn on</button>'}</div>` : ''}
       <div class="row" style="margin-top:12px"><button class="btn" data-act="lock-now">Lock now</button><button class="btn" data-act="lock-change">Change passcode</button><button class="btn danger" data-act="lock-off">Turn off</button></div>
       <p class="muted small" style="margin-bottom:0">Notifications still appear on your lock screen. To hide their text, use iPhone Settings ▸ Notifications ▸ ZR &amp; YC ▸ Show Previews.</p>`;
   }
@@ -3165,6 +3236,16 @@
     else if (act === 'lock-off') openLock('check', 'off');
     else if (act === 'lock-cancel') closeLock();
     else if (act === 'lock-forgot') lockForgot();
+    else if (act === 'lock-bio') lockBio(false);
+    else if (act === 'bio-on') {
+      el.disabled = true;
+      bioSetUp().then(worked => { $('#lock-card').innerHTML = lockCard(); toast(worked ? '✓ ' + BIO_NAME + ' unlocks the app' : 'Couldn’t save it on this device.', !worked); },
+        err => { el.disabled = false; if (err && err.name !== 'NotAllowedError') toast(BIO_NAME + ' couldn’t be set up: ' + errText(err), true); });
+    } else if (act === 'bio-off') {
+      store.set('lock-bio', '');
+      $('#lock-card').innerHTML = lockCard();
+      toast(BIO_NAME + ' turned off. The passcode unlocks the app.');
+    }
     else if (act === 'wallet-open' || act === 'wallet-back') {
       state.walletId = act === 'wallet-open' ? key : null;
       render();
