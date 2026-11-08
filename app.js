@@ -1685,7 +1685,8 @@
       bg = accent;
     }
     const [w, h] = widgetBox(size);
-    const bgCss = back === 'picture' ? `background:linear-gradient(rgba(0,0,0,.32),rgba(0,0,0,.32)),url('${picture}') center/cover` : `background:${bg}`;
+    // .45 = PICTURE_SHADE in widget/scriptable.js: dark enough for white words, also on a Clear or Tinted Home Screen.
+    const bgCss = back === 'picture' ? `background:linear-gradient(rgba(0,0,0,.45),rgba(0,0,0,.45)),url('${picture}') center/cover` : `background:${bg}`;
     // Real size, or a little smaller where the card is narrower than the widget (medium on smaller iPhones).
     const box = `class="wprev ${size}" style="width:min(${w}px,100%);aspect-ratio:${w}/${h};${bgCss};color:${ink}" role="img"`;
     const name = who === 'All' ? 'Both of us' : pName(who);

@@ -10,6 +10,9 @@
 const CODE = '__WIDGET_CODE__';
 const STORE = 'zryc-widget.json';
 const REFRESH_MINUTES = 5; // a request: iOS decides when widgets really refresh
+// How much a picture background is darkened. Enough that white words stay readable on bright photos, and on a
+// Clear or Tinted Home Screen, where iOS dims and recolours the picture but keeps the words.
+const PICTURE_SHADE = 0.45;
 
 const parts = CODE.split('|');
 const connected = parts[0] === 'ZRW1' && parts.length === 3 && /^https:\/\//.test(parts[1]);
@@ -114,7 +117,7 @@ function palette(d, hasPicture) {
     track: dyn(onLight.track, onDark.track), bad: dyn(onLight.bad, onDark.bad), rings: onLight.rings, ringTrack: onLight.ringTrack, bar: accent };
 }
 
-// The picture, cut to the widget's shape and darkened a little so white words stay readable on any photo.
+// The picture, cut to the widget's shape and darkened (PICTURE_SHADE) so white words stay readable on any photo.
 function pictureBackground(size, family) {
   if (!fm.fileExists(picFile(size))) return null;
   const pic = Image.fromFile(picFile(size));
@@ -128,7 +131,7 @@ function pictureBackground(size, family) {
   const w = pic.size.width * zoom;
   const h = pic.size.height * zoom;
   ctx.drawImageInRect(pic, new Rect((box.width - w) / 2, (box.height - h) / 2, w, h));
-  ctx.setFillColor(new Color('#000000', 0.32));
+  ctx.setFillColor(new Color('#000000', PICTURE_SHADE));
   ctx.fillRect(new Rect(0, 0, box.width, box.height));
   return ctx.getImage();
 }
