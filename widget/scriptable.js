@@ -1,8 +1,8 @@
 // ZR & YC widget for iPhone. Runs in the free Scriptable app.
 // Copy it from the ZR & YC app ▸ Me ▸ Settings ▸ Home Screen widgets: that fills in this phone's code below.
 // The server works the numbers out on every refresh, so they include the other person's new entries without
-// anyone opening the app. The look (background, colour, picture, whose numbers) is chosen in the app, so this
-// script never needs copying again.
+// anyone opening the app. The look (background, colour, picture, whose numbers) is chosen in the app, and the
+// script keeps itself up to date from the website (selfUpdate below), so it never needs copying again.
 //   Small widget: this month's everyday (Living Expenses) budget left.
 //   Medium widget: this month's income, expenses and what's left.
 // Optional: type ZR, YC or Both under Parameter (Edit Widget) to show someone else's numbers on this widget.
@@ -25,6 +25,32 @@ function readStore() {
   try { return fm.fileExists(storeFile) ? JSON.parse(fm.readString(storeFile)) || {} : {}; } catch (e) { return {}; }
 }
 const writeStore = (store) => fm.writeString(storeFile, JSON.stringify(store));
+
+// ============================== keeping itself up to date ==============================
+// The newest script is on the ZR & YC website. At most every UPDATE_HOURS this fetches it and, if it changed, saves it
+// over this script, keeping this phone's code. The new version runs from the next refresh. Anything that doesn't look
+// like this script (an error page, a half download) is ignored, so a bad download can't break the widget.
+const SOURCE_URL = 'https://ycccc14.github.io/zryc-finance/widget/scriptable.js';
+const UPDATE_HOURS = 6;
+const FIRST_LINE = '// ZR & YC widget for iPhone.';
+const PLACEHOLDER = "'__WIDGET" + "_CODE__'"; // split, so the placeholder appears only once in this file
+
+async function selfUpdate() {
+  if (!connected || typeof module === 'undefined' || !module.filename) return;
+  const store = readStore();
+  if (Date.now() - (store._checked || 0) < UPDATE_HOURS * 3600000) return;
+  store._checked = Date.now();
+  writeStore(store);
+  try {
+    const req = new Request(SOURCE_URL + '?t=' + Date.now());
+    req.timeoutInterval = 15;
+    const text = await req.loadString();
+    if (typeof text !== 'string' || !text.startsWith(FIRST_LINE) || text.split(PLACEHOLDER).length !== 2 || !/Script\.complete\(\);\s*$/.test(text)) return;
+    const next = text.replace(PLACEHOLDER, () => "'" + CODE + "'");
+    const files = FileManager.iCloud().isFileStoredIniCloud(module.filename) ? FileManager.iCloud() : FileManager.local();
+    if (files.readString(module.filename) !== next) files.writeString(module.filename, next);
+  } catch (e) { /* offline or a hiccup: try again next time */ }
+}
 
 function forget() {
   ['s', 'm'].forEach((size) => { if (fm.fileExists(picFile(size))) fm.remove(picFile(size)); });
@@ -339,6 +365,7 @@ async function build(family, param) {
   return size === 's' ? drawSmall(state.data, stale, 'small') : drawWide(state.data, stale, 'medium');
 }
 
+await selfUpdate();
 const query = args.queryParameters || {};
 if (config.runsInWidget) {
   Script.setWidget(await build(config.widgetFamily, String(args.widgetParameter || '').trim()));

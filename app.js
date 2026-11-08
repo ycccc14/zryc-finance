@@ -1759,7 +1759,7 @@
         <li>Touch and hold the new widget ▸ <strong>Edit Widget</strong> ▸ <strong>Script</strong>: <strong>ZR &amp; YC</strong>. Add both sizes if you like.</li></ol>
       <button class="btn primary" data-act="widget-copy" style="width:100%">📋 Copy script</button>
       <textarea id="widget-script" class="sr" readonly aria-hidden="true" tabindex="-1"></textarea>
-      <p class="muted small">Changes here reach the widget at its next refresh: no need to copy the script again. iPhone decides when widgets refresh (usually every 5–15 minutes); opening the widget’s script in Scriptable refreshes it straight away. To show someone else’s numbers on one widget, type <strong>ZR</strong>, <strong>YC</strong> or <strong>Both</strong> under <strong>Parameter</strong> in Edit Widget. Tapping a widget opens it in Scriptable with the latest numbers.</p>
+      <p class="muted small">Changes here reach the widget at its next refresh, and the script updates itself from the website (it checks every few hours), so you only copy it once. iPhone decides when widgets refresh (usually every 5–15 minutes); opening the widget’s script in Scriptable refreshes it straight away. To show someone else’s numbers on one widget, type <strong>ZR</strong>, <strong>YC</strong> or <strong>Both</strong> under <strong>Parameter</strong> in Edit Widget. Tapping a widget opens it in Scriptable with the latest numbers.</p>
       <p class="muted small" style="margin-bottom:0">🔒 The script holds a key that can only read these totals, never your entries. Keep it to yourself; <button class="btn link danger" data-act="widget-off" style="padding:0;min-height:0">turn widgets off</button> to stop it working.</p>`;
   }
 
