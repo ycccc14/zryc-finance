@@ -166,7 +166,8 @@ function ringImage(part, color, track, side, width) {
   return ctx.getImage();
 }
 
-// On a picture every word gets a soft dark shadow, so it stays readable over bright parts of the photo.
+// On a picture every word gets a soft grey shadow, so it stays readable over bright parts of the photo. Grey, not
+// black: a Tinted Home Screen recolours the shadow too, and a black one came out as a bright white glow there.
 let textShadow = false;
 
 function addText(stack, text, font, color, opts) {
@@ -176,7 +177,7 @@ function addText(stack, text, font, color, opts) {
   t.lineLimit = 1;
   t.minimumScaleFactor = (opts && opts.shrink) || 0.75;
   if (textShadow) {
-    t.shadowColor = new Color('#000000', 0.6);
+    t.shadowColor = new Color('#5A5A5A', 0.55);
     t.shadowRadius = 3;
     t.shadowOffset = new Point(0, 1);
   }
