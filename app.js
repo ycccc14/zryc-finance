@@ -530,7 +530,7 @@
           <button class="btn" data-act="paycheck-change" ${data}>✏️ Change</button>
           <button class="btn link" data-act="paycheck-skip" ${data}>No pay</button></div></div></div>`;
     }).join('');
-    return `<section class="card" style="border:2px solid var(--brand-deep)"><div class="card-head"><h2>💼 Pay check</h2><span class="hint">week of ${dayLabel(tue)}</span></div>${rows}</section>`;
+    return `<section class="card" style="border:2px solid var(--brand-deep)"><div class="card-head"><h2>💼 Pay check</h2></div>${rows}</section>`;
   }
 
   /** Pays from the last 3 weeks whose savings transfers aren't marked done. */
@@ -1570,7 +1570,7 @@
     const what = `<ul class="small" style="padding-left:20px;margin:0 0 10px;display:grid;gap:3px">
         <li><strong>Tuesday ${hour(sch.payHour)}</strong>: did you get paid? Tap to record it (your usual days are filled in).</li>
         <li><strong>Daily ${hour(sch.remindHour)}</strong>: pay still to move to Self Saving / Shared Saving, until you tap ✅ Done.</li>
-        <li><strong>1st of the month</strong>: record last month’s bank interest.</li>
+        <li><strong>1st of the month, ${hour(sch.interestHour)}</strong>: record last month’s bank interest.</li>
         <li><strong>Split bills</strong>: as soon as the other person adds a bill they paid, on Tuesdays, and when they tap <strong>Remind</strong>.</li></ul>`;
     const phones = status.phones.length ? `<h3 style="margin-top:12px">Phones with notifications</h3>${status.phones.map(ph => `<div class="spread" style="padding:6px 0;border-top:1px solid var(--line)">
         <span><strong>${esc(ph.name)}</strong>${ph.me ? ' <span class="tag good">this phone</span>' : ''}<div class="muted small">for ${esc(who(ph.person))}</div></span></div>`).join('')}` : '';
