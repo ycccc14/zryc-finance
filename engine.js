@@ -142,10 +142,20 @@ function TrackerEngine() {
     return { key: days < 0 ? 'overdue' : days === 0 ? 'today' : days <= before ? 'soon' : 'later', days };
   }
 
-  /** The bill as an expense entry (what Pay fills in, and what "Record automatically" saves). */
-  function billExpense(b, date) {
-    return { date: date || b.date, person: b.person, paidBy: b.paidBy || (b.person === SHARED ? '' : b.person), amount: num(b.amount),
-      category: b.category, description: b.title, splitPct: b.person === SHARED ? b.splitPct : '', fund: '' };
+  /** A bill's amount in AUD. Ringgit bills use `rate` (MYR per AUD, today's), or the rate saved with the bill. */
+  function billAud(b, rate) {
+    if (b.currency !== 'MYR' || !(num(b.fxAmount) > 0)) return round2(num(b.amount));
+    const r = num(rate) > 0 ? num(rate) : num(b.fxRate);
+    return r > 0 ? round2(num(b.fxAmount) / r) : round2(num(b.amount));
+  }
+
+  /** The bill as an expense entry (what Pay fills in, and what "Record automatically" saves). Ringgit bills at `rate`. */
+  function billExpense(b, date, rate) {
+    const myr = b.currency === 'MYR' && num(b.fxAmount) > 0;
+    const r = num(rate) > 0 ? num(rate) : num(b.fxRate);
+    return { date: date || b.date, person: b.person, paidBy: b.paidBy || (b.person === SHARED ? '' : b.person), amount: billAud(b, rate),
+      category: b.category, description: b.title, splitPct: b.person === SHARED ? b.splitPct : '', fund: '',
+      currency: myr ? 'MYR' : '', fxAmount: myr ? num(b.fxAmount) : '', fxRate: myr ? r : '' };
   }
 
   /** The same bill moved on to its next due date (or finished, for a one-time bill). */
@@ -884,6 +894,7 @@ function TrackerEngine() {
         category: b.category || '', splitPct: isBlank(b.splitPct) ? '' : pct(b.splitPct), repeat, day: num(b.day) || +b.date.slice(8, 10),
         before: Math.max(0, Math.min(30, Math.floor(num(b.before)))), hour: isBlank(b.hour) ? 9 : Math.max(0, Math.min(23, Math.floor(num(b.hour)))),
         auto: b.auto === 'Yes' ? 'Yes' : '', done: b.done === 'Yes' ? 'Yes' : '', lastPaid: validDate(b.lastPaid) ? b.lastPaid : '', note: b.note || '',
+        currency: b.currency === 'MYR' ? 'MYR' : '', fxAmount: b.currency === 'MYR' ? num(b.fxAmount) : '', fxRate: b.currency === 'MYR' ? num(b.fxRate) : '',
         perMonth: round2(amount * BILL_REPEATS[repeat].perMonth),
       };
     }).sort((a, b) => (a.done !== b.done ? (a.done ? 1 : -1) : a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -913,7 +924,7 @@ function TrackerEngine() {
 
   return {
     compute, monthSummary, settingsOf, withhold, annualTax, autoScale, scaleFor, walletTransfer, walletMonth, WALLET_TYPES, FEE_CATEGORY,
-    BILL_REPEATS, billsOf, billNext, billStatus, billExpense, billPaid, daysBetween,
+    BILL_REPEATS, billsOf, billAud, billNext, billStatus, billExpense, billPaid, daysBetween,
     fyOf, fyMonths, fyName, normFy, monthOf, weekStart, addDays, addMonths, monthRange, todayISO,
     isBlank, num, pct, round2,
     ALL, SHARED, RESIDENT, FOREIGN, WHM,

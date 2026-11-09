@@ -507,6 +507,8 @@
       : `<span class="muted">${dayLabel(b.date)}</span>`;
   };
   const billOf = id => state.M.bills.find(b => b.id === String(id));
+  /** A bill's amount in AUD: ringgit bills at today's exchange rate. */
+  const billAud = b => E.billAud(b, state.M.general.exchangeRate);
 
   function billRow(b) {
     const whose = b.person === 'Shared' ? 'Shared' + (b.paidBy ? ' · ' + pName(b.paidBy) + ' pays' : '') : pName(b.person) + (b.paidBy && b.paidBy !== b.person ? ' · ' + pName(b.paidBy) + ' pays' : '');
@@ -514,7 +516,7 @@
       : `<button type="button" class="btn primary sm" data-act="bill-pay" data-key="${esc(b.id)}">Pay</button>`;
     return `<div class="tx" role="button" tabindex="0" data-act="edit" data-kind="bills" data-id="${esc(b.id)}">${tile(cIcon(b.category), cColour(b.category), 'round')}
       <div class="tx-main"><span class="tx-title">${esc(b.title)}</span><span class="tx-sub">${b.done ? 'Paid ' + (b.lastPaid ? dayLabel(b.lastPaid) : '') : billWhen(b) + ' · ' + esc(E.BILL_REPEATS[b.repeat].short)} · ${esc(whose)}</span></div>
-      <div class="tx-amt">${b.amount ? money(b.amount) : '<span class="muted">—</span>'}</div>${action}</div>`;
+      <div class="tx-amt">${b.currency === 'MYR' ? `${myr(b.fxAmount)}<small>≈ ${money(billAud(b))}</small>` : b.amount ? money(b.amount) : '<span class="muted">—</span>'}</div>${action}</div>`;
   }
 
   /** Home: bills that are overdue or inside their reminder window (at least 3 days ahead). */
@@ -532,7 +534,7 @@
     const active = all.filter(b => !b.done);
     const done = all.filter(b => b.done);
     const share = b => (sel === 'All' || b.person === sel ? 1 : b.person === 'Shared' ? (sel === M.codes[0] ? (blank(b.splitPct) ? M.general.sharedSplit : b.splitPct) : 1 - (blank(b.splitPct) ? M.general.sharedSplit : b.splitPct)) : 0);
-    const perMonth = sumOf(active, b => b.perMonth * share(b));
+    const perMonth = sumOf(active, b => billAud(b) * (E.BILL_REPEATS[b.repeat].perMonth || 0) * share(b));
     const hero = `<section class="hero"><div class="label">${sel === 'All' ? 'Our' : esc(pName(sel)) + '’s'} bills &amp; subscriptions</div>
       <div class="big">${money(perMonth)}<span style="font-size:16px;font-weight:600"> a month</span></div>
       <div class="myr">${active.length} active${active.filter(b => b.auto).length ? ' · ' + active.filter(b => b.auto).length + ' recorded automatically' : ''}</div>
@@ -545,7 +547,7 @@
       ['Later', b => E.billStatus(b, M.today).days > 7]];
     const cards = groups.map(([title, test]) => {
       const list = active.filter(test);
-      return list.length ? `<section class="card flush"><div class="card-head"><h2>${title}</h2><span class="hint">${money(sumOf(list, b => b.amount))}</span></div>
+      return list.length ? `<section class="card flush"><div class="card-head"><h2>${title}</h2><span class="hint">${money(sumOf(list, billAud))}</span></div>
         <div class="tx-list">${list.map(billRow).join('')}</div></section>` : '';
     }).join('');
     const finished = done.length ? `<section class="card"><details class="more"><summary>Finished one-time bills (${done.length})</summary>
@@ -559,7 +561,8 @@
   function payBill(id) {
     const b = billOf(id);
     if (!b || b.done) return;
-    const rec = Object.assign(newRecord('expenses'), E.billExpense(b, state.M.today), { amount: b.amount || '' });
+    const x = E.billExpense(b, state.M.today, state.M.general.exchangeRate);
+    const rec = Object.assign(newRecord('expenses'), x, { amount: x.amount || '' });
     openForm('expenses', rec, { isNew: true, bill: b.id });
   }
 
@@ -2446,7 +2449,7 @@
       body = `
         ${field('What’s the bill?', 'title', r.title, 'type="text" maxlength="60" placeholder="e.g. Phone plan, Netflix" required')}
         ${F.isNew ? `<div class="scroller">${BILL_IDEAS.map(([t]) => `<button type="button" class="filter-chip" data-act="bill-idea" data-key="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : ''}
-        ${keypad(false)}
+        ${keypad(true)}
         <div class="field"><span>Whose bill?</span>${who(r.person, people.concat([['Shared', 'Shared']]))}</div>
         <div class="field"><span>Who pays it?</span><input type="hidden" name="paidBy" value="${esc(r.paidBy || '')}">${who(r.paidBy, people, 'form-paidby')}</div>
         ${r.person === 'Shared' ? `<div class="field"><span>Split: ${esc(pName(M.codes[0]))} <output id="split-out">${split}</output>% · ${esc(pName(M.codes[1]))} <output id="split-out2">${100 - split}</output>%</span>
@@ -2569,8 +2572,11 @@
       ? `<div class="seg kinds" role="group" aria-label="Entry type">${[['income', '💼 Income'], ['expenses', '🧾 Expense'], ['adjustments', '🔁 Adjust'], ['interest', '🏦 Interest']].map(([k, l]) =>
         `<button type="button" data-act="form-kind" data-key="${k}" aria-pressed="${F.kind === k}">${l}</button>`).join('')}</div>`
       : `<h2 id="form-title">Edit ${F.kind === 'income' && F.payType === 'other' ? 'other income' : KIND_LABEL[F.kind].toLowerCase()}</h2>`;
-    $('#modal').innerHTML = `
-      <div class="sheet" role="dialog" aria-modal="true" aria-label="${F.isNew ? 'Add entry' : 'Edit entry'}"><div class="grab"></div>
+    const modal = $('#modal');
+    const before = modal.hidden ? null : $('.sheet', modal);
+    const keepTop = before && F.drawn ? before.scrollTop : 0;
+    modal.innerHTML = `
+      <div class="sheet${before ? ' still' : ''}" role="dialog" aria-modal="true" aria-label="${F.isNew ? 'Add entry' : 'Edit entry'}"><div class="grab"></div>
         <div class="spread" style="margin-bottom:14px">${kindSwitch}<button type="button" class="icon-btn" data-act="close" aria-label="Close" style="flex:none">${ico('close', 18)}</button></div>
         <form class="form" id="entry-form" onsubmit="return false">${body}
           ${picking ? '' : `<div class="${F.kind === 'wallets' ? '' : 'receipt'}" id="form-preview"></div>
@@ -2582,6 +2588,8 @@
         </form></div>`;
     if ($('#calc-value')) calcSync();
     else updatePreview();
+    if (keepTop) $('.sheet', modal).scrollTop = keepTop;
+    F.drawn = true;
   }
 
   function readForm() {
@@ -2612,10 +2620,11 @@
         const o2 = $('#split-out2');
         if (o1) { o1.textContent = Math.round(p1 * 100); o2.textContent = 100 - Math.round(p1 * 100); }
       }
+      if (r.currency === 'MYR' && !blank(r.fxAmount)) split = line('Typed in MYR', `${myr(Number(r.fxAmount))} ÷ ${r.fxRate}`) + split;
       el.innerHTML = split + (/^\d{4}-\d{2}-\d{2}$/.test(r.date || '') ? line('Due', dayLabel(r.date) + (next ? ` · then ${dayLabel(next)}` : ' · once')) +
         line('Reminder', (before ? dayLabel(E.addDays(r.date, -before)) + ' and on the day' : 'On the day') + ', ' + hourName(Number(r.hour) || 9)) : '') +
         (amt && E.BILL_REPEATS[r.repeat] && E.BILL_REPEATS[r.repeat].perMonth ? line('About', money(amt * E.BILL_REPEATS[r.repeat].perMonth) + ' a month') : '') +
-        `<span class="muted small">${r.auto === 'Yes' ? 'The expense is added by itself on each due date.' : 'Tap Pay when you’ve paid: it adds the expense and moves the bill on.'}</span>`;
+        `<span class="muted small">${r.auto === 'Yes' ? 'The expense is added by itself on each due date.' : 'Tap Pay when you’ve paid: it adds the expense and moves the bill on.'}${r.currency === 'MYR' ? ' The ringgit amount is turned into AUD at that day’s exchange rate.' : ''}</span>`;
       return;
     }
     if (F.kind === 'income' && F.payType === 'other') {
@@ -2713,7 +2722,7 @@
   let localEdits = 0; // changes shown here that a copy loaded from the server earlier won't have
   // `unsaved`: the iPhone app opened from this copy reloads in full, in case a save never arrived.
   const cacheApp = () => { if (window.__trackerCache) window.__trackerCache(Object.assign({}, state.app, { unsaved: pendingSaves > 0 })); };
-  const refreshLocal = () => { localEdits++; recompute(); render(); cacheApp(); };
+  const refreshLocal = () => { localEdits++; recompute(); renderKeepingPlace(); cacheApp(); };
   window.addEventListener('beforeunload', e => {
     if (pendingSaves > 0) { e.preventDefault(); e.returnValue = ''; } // don't lose a save that's still on its way
   });
@@ -2839,8 +2848,7 @@
       Object.assign(payload, { otherNet: payload.amount, days: 0, hoursPerDay: '', extraHours: '', rate: '', scale: '', actualTax: '' });
     }
     if (F.kind === 'income') delete payload.amount;
-    if (F.kind !== 'expenses' && F.kind !== 'wallets' && !(F.kind === 'income' && F.payType === 'other')) {
-      // (bills are always in AUD)
+    if (F.kind !== 'expenses' && F.kind !== 'wallets' && F.kind !== 'bills' && !(F.kind === 'income' && F.payType === 'other')) {
       delete payload.currency;
       delete payload.fxAmount;
       delete payload.fxRate;
@@ -3438,7 +3446,7 @@
       const order = ['All'].concat(state.M.codes);
       state.person = order[(order.indexOf(state.person) + Number(key) + order.length) % order.length];
       store.set('person', state.person);
-      render();
+      renderKeepingPlace();
     } else if (act === 'month') {
       const M = state.M;
       const months = M.months.indexOf(state.month) < 0 ? M.months.concat(state.month).sort() : M.months;
@@ -3447,9 +3455,9 @@
         state.month = next;
         state.fy = E.fyOf(next + '-01');
         state.cat = '';
-        render();
+        renderKeepingPlace();
       }
-    } else if (act === 'bill-tab') { state.billTab = key; render(); }
+    } else if (act === 'bill-tab') { state.billTab = key; renderKeepingPlace(); }
     else if (act === 'bill-new') openForm('bills', null);
     else if (act === 'bill-pay') payBill(key);
     else if (act === 'bill-skip') {
@@ -3471,7 +3479,7 @@
     } else if (act === 'bill-auto') { readForm(); state.form.rec.auto = key; renderForm(); }
     else if (act === 'bill-done') { readForm(); state.form.rec.done = key; renderForm(); }
     else if (act === 'interest-record') openForm('interest', Object.assign(newRecord('interest'), { date: el.dataset.date }), { isNew: true });
-    else if (act === 'interest-skip') { store.set('skip-interest-' + key, '1'); render(); }
+    else if (act === 'interest-skip') { store.set('skip-interest-' + key, '1'); renderKeepingPlace(); }
     else if (act === 'settle-up') settleUp(); else if (act === 'split-add') {
       const rec = newRecord(key === 'payback' ? 'paybacks' : 'expenses');
       if (key !== 'payback') rec.person = 'Shared';
@@ -3491,7 +3499,7 @@
       }
     } else if (act === 'paycheck-skip') {
       store.set('skip-pay-' + key + '-' + el.dataset.date, '1');
-      render();
+      renderKeepingPlace();
     } else if (act === 'xfer-done') {
       const ids = key.split(',');
       const before = state.app.data.income.map(r => Object.assign({}, r));
@@ -3575,9 +3583,9 @@
     else if (act === 'person') {
       state.person = key;
       store.set('person', key);
-      render();
-    } else if (act === 'cat') { state.cat = key; render(); }
-    else if (act === 'fy') { state.fy = key; render(); }
+      renderKeepingPlace();
+    } else if (act === 'cat') { state.cat = key; renderKeepingPlace(); }
+    else if (act === 'fy') { state.fy = key; renderKeepingPlace(); }
     else if (act === 'acct-transfer' || act === 'acct-open') {
       const M = state.M;
       const code = state.person !== 'All' ? state.person : (M.codes.indexOf(store.get('lastPerson')) >= 0 ? store.get('lastPerson') : M.codes[0]);
@@ -3719,10 +3727,10 @@
       state.month = el.value;
       state.fy = E.fyOf(el.value + '-01');
       state.cat = '';
-      render();
+      renderKeepingPlace();
     } else if (what === 'fy') {
       state.fy = el.value;
-      render();
+      renderKeepingPlace();
     } else if (what === 'tax-fy') {
       state.taxFy = el.value;
       renderTaxTables();
