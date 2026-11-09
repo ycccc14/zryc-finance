@@ -390,8 +390,9 @@
   [data-act], [role=button], .modal { cursor: pointer; }
   .sheet { cursor: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
   .modal { overscroll-behavior: contain; }
-  /* No double-tap zoom or 300 ms delay on buttons. */
-  button, a, select, [role=button], [data-act] { touch-action: manipulation; }
+  /* No double-tap zoom (or 300 ms tap delay) anywhere: children can only narrow this, never undo it.
+     Pinch zoom and scrolling still work. */
+  html, button, a, select, [role=button], [data-act] { touch-action: manipulation; }
   /* dvh = the visible height with Safari's toolbars, so the Save button is never hidden. */
   .sheet { max-height: 94vh; max-height: 94dvh; }
   /* iOS date fields ignore width:100% and overflow two-column rows without this. */
@@ -687,8 +688,8 @@
   <div id="lock" class="lock" hidden></div>
   <div id="pair" hidden></div>
   <script src="vendor/chart.umd.js"></script>
-  <script src="engine.js?v=6e85bd7554"></script>
-  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = '6e85bd7554';</script>
-  <script src="boot.js?v=6e85bd7554"></script>
+  <script src="engine.js?v=a0f53f015a"></script>
+  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = 'a0f53f015a';</script>
+  <script src="boot.js?v=a0f53f015a"></script>
 </body>
 </html>
