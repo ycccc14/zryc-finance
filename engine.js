@@ -7,7 +7,7 @@
  *
  * `data` is what getAppData() returns under .data:
  *   { settings: { general, people, funds, allocations, categories, taxYears, brackets, withholding },
- *     income: [...], expenses: [...], adjustments: [...], wallets: [...], walletChecks: [...], walletTransfers: [...] }
+ *     income: [...], expenses: [...], adjustments: [...], wallets: [...], walletChecks: [...], walletTransfers: [...], bills: [...] }
  */
 function TrackerEngine() {
   'use strict';
@@ -103,6 +103,55 @@ function TrackerEngine() {
     const out = [];
     for (let m = from; m <= to; m = addMonths(m, 1)) out.push(m);
     return out;
+  }
+
+  // ---------- bills & subscriptions ----------
+
+  /** How each "Repeats" choice moves a bill's due date on, and roughly what it costs per month. */
+  const BILL_REPEATS = {
+    none: { label: 'One time', short: 'Once', days: 0, months: 0, perMonth: 0 },
+    week: { label: 'Every week', short: 'Weekly', days: 7, months: 0, perMonth: 52 / 12 },
+    '2week': { label: 'Every 2 weeks', short: 'Fortnightly', days: 14, months: 0, perMonth: 26 / 12 },
+    '4week': { label: 'Every 4 weeks', short: '4-weekly', days: 28, months: 0, perMonth: 13 / 12 },
+    month: { label: 'Every month', short: 'Monthly', days: 0, months: 1, perMonth: 1 },
+    '3month': { label: 'Every 3 months', short: 'Quarterly', days: 0, months: 3, perMonth: 1 / 3 },
+    '6month': { label: 'Every 6 months', short: '6-monthly', days: 0, months: 6, perMonth: 1 / 6 },
+    year: { label: 'Every year', short: 'Yearly', days: 0, months: 12, perMonth: 1 / 12 },
+  };
+
+  /** A date `n` months on, keeping the bill's usual day (or the month's last day when the month is shorter). */
+  function addMonthsKeepDay(s, n, day) {
+    const ym = addMonths(s.slice(0, 7), n);
+    const last = new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7), 0)).getUTCDate();
+    return ym + '-' + pad(Math.min(day || +s.slice(8, 10), last));
+  }
+
+  /** The due date after this one, or '' for a one-time bill. */
+  function billNext(b) {
+    const r = BILL_REPEATS[b.repeat] || BILL_REPEATS.none;
+    if (!validDate(b.date)) return '';
+    if (r.days) return addDays(b.date, r.days);
+    if (r.months) return addMonthsKeepDay(b.date, r.months, num(b.day) || +b.date.slice(8, 10));
+    return '';
+  }
+
+  /** Where a bill stands on `today`: overdue, today, soon (inside its reminder window, or 3 days), or later. */
+  function billStatus(b, today) {
+    const days = daysBetween(today, b.date);
+    const before = Math.max(num(b.before), 3);
+    return { key: days < 0 ? 'overdue' : days === 0 ? 'today' : days <= before ? 'soon' : 'later', days };
+  }
+
+  /** The bill as an expense entry (what Pay fills in, and what "Record automatically" saves). */
+  function billExpense(b, date) {
+    return { date: date || b.date, person: b.person, paidBy: b.paidBy || (b.person === SHARED ? '' : b.person), amount: num(b.amount),
+      category: b.category, description: b.title, splitPct: b.person === SHARED ? b.splitPct : '', fund: '' };
+  }
+
+  /** The same bill moved on to its next due date (or finished, for a one-time bill). */
+  function billPaid(b, paidOn) {
+    const next = billNext(b);
+    return Object.assign({}, b, { lastPaid: paidOn || b.date, date: next || b.date, done: next ? '' : 'Yes' });
   }
 
   /** The 12 months of a financial year, Jul → Jun. */
@@ -814,7 +863,7 @@ function TrackerEngine() {
       accounts: accountNames, ledgers,
       allocations: S.allocations,
       currentAllocation: allocationFor(today, S.allocations),
-      income, expenses, adjustments, interest, paybacks, split,
+      income, expenses, adjustments, interest, paybacks, split, bills: billsOf(data.bills, codes),
       viewer, wallets, walletTransfers, walletTotals,
       weekly: Object.keys(weekly).sort().map(k => weekly[k]),
       monthly, fyTotals, catByMonth, balances, estimates,
@@ -822,6 +871,22 @@ function TrackerEngine() {
       fys: Object.keys(fySet).sort(),
       warnings,
     };
+  }
+
+  /** Bills & subscriptions, tidied: active ones by due date first, then finished ones. */
+  function billsOf(list, codes) {
+    return (list || []).filter(b => b && validDate(b.date) && String(b.title || '').trim()).map(b => {
+      const person = b.person === SHARED || codes.indexOf(b.person) >= 0 ? b.person : SHARED;
+      const repeat = BILL_REPEATS[b.repeat] ? b.repeat : 'none';
+      const amount = round2(num(b.amount));
+      return {
+        id: String(b.id), date: b.date, title: String(b.title).trim(), amount, person, paidBy: codes.indexOf(b.paidBy) >= 0 ? b.paidBy : '',
+        category: b.category || '', splitPct: isBlank(b.splitPct) ? '' : pct(b.splitPct), repeat, day: num(b.day) || +b.date.slice(8, 10),
+        before: Math.max(0, Math.min(30, Math.floor(num(b.before)))), hour: isBlank(b.hour) ? 9 : Math.max(0, Math.min(23, Math.floor(num(b.hour)))),
+        auto: b.auto === 'Yes' ? 'Yes' : '', done: b.done === 'Yes' ? 'Yes' : '', lastPaid: validDate(b.lastPaid) ? b.lastPaid : '', note: b.note || '',
+        perMonth: round2(amount * BILL_REPEATS[repeat].perMonth),
+      };
+    }).sort((a, b) => (a.done !== b.done ? (a.done ? 1 : -1) : a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   }
 
   /**
@@ -848,6 +913,7 @@ function TrackerEngine() {
 
   return {
     compute, monthSummary, settingsOf, withhold, annualTax, autoScale, scaleFor, walletTransfer, walletMonth, WALLET_TYPES, FEE_CATEGORY,
+    BILL_REPEATS, billsOf, billNext, billStatus, billExpense, billPaid, daysBetween,
     fyOf, fyMonths, fyName, normFy, monthOf, weekStart, addDays, addMonths, monthRange, todayISO,
     isBlank, num, pct, round2,
     ALL, SHARED, RESIDENT, FOREIGN, WHM,

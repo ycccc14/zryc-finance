@@ -13,7 +13,13 @@
   const SCALES = ['Auto', '1', '2', '3', '5', '6', 'WHM'];
   const SCALE_NAMES = { 1: 'Scale 1 (no tax-free threshold)', 2: 'Scale 2 (tax-free threshold)', 3: 'Scale 3 (foreign resident)', 5: 'Scale 5 (full Medicare exemption)', 6: 'Scale 6 (half Medicare exemption)', WHM: 'Working holiday maker' };
   const RESIDENCIES = ['Resident', 'Foreign resident', 'Working holiday maker'];
-  const KIND_LABEL = { income: 'Pay', expenses: 'Expense', adjustments: 'Adjustment', interest: 'Interest', paybacks: 'Payback', wallets: 'Account', walletChecks: 'Balance', walletTransfers: 'Transfer' };
+  const KIND_LABEL = { income: 'Pay', expenses: 'Expense', adjustments: 'Adjustment', interest: 'Interest', paybacks: 'Payback', wallets: 'Account', walletChecks: 'Balance', walletTransfers: 'Transfer', bills: 'Bill' };
+  // Quick picks for a new bill: [name, category it usually belongs to (first match), repeats].
+  const BILL_IDEAS = [['Phone plan', /phone/i, 'month'], ['Internet', /phone|internet/i, 'month'], ['Rent', /rent|housing/i, 'month'],
+    ['Electricity', /bill|util/i, '3month'], ['Gas', /bill|util/i, '3month'], ['Water', /bill|util/i, '3month'], ['Netflix', /subscri|entertain/i, 'month'],
+    ['Spotify', /subscri|entertain/i, 'month'], ['YouTube Premium', /subscri|entertain/i, 'month'], ['iCloud', /subscri|phone/i, 'month'],
+    ['Disney+', /subscri|entertain/i, 'month'], ['Gym', /gym|sport|health/i, '2week'], ['Insurance', /insur/i, 'year'], ['Opal', /transport/i, 'week']];
+  const BILL_BEFORE = [[0, 'On the day'], [1, '1 day before'], [2, '2 days before'], [3, '3 days before'], [7, '1 week before']];
 
   // Icons used when a fund or category has none set in Settings.
   const ICON_FALLBACK = {
@@ -63,6 +69,7 @@
     user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
     card: '<rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19M6.5 15h3"/>',
+    calendar: '<rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4M8 14h2M14 14h2M8 17.5h2"/>',
   };
   /** The app icon (same artwork as assets/icon.svg). */
   let iconSeq = 0;
@@ -224,6 +231,7 @@
   const VIEWS = [
     ['dashboard', 'Home', 'home', viewDashboard],
     ['split', 'Split bills', 'split', viewSplit],
+    ['bills', 'Subscriptions', 'calendar', viewBills],
     ['wallet', 'Wallet', 'card', viewWallet],
     ['accounts', 'Accounts', 'bank', viewAccounts],
     ['balances', 'Funds', 'wallet', viewBalances],
@@ -238,7 +246,7 @@
   ];
   // Bottom-bar sections: [id, label, icon, pages]. Pages in a section share a tab row in the header.
   const GROUPS = [
-    ['home', 'Home', 'home', ['dashboard', 'split']],
+    ['home', 'Home', 'home', ['dashboard', 'split', 'bills']],
     ['money', 'Savings', 'wallet', ['wallet', 'accounts', 'balances', 'interest']],
     ['reports', 'Reports', 'chart', ['expenses', 'income', 'super', 'tax']],
     ['me', 'Me', 'user', ['me', 'budget', 'settings']],
@@ -484,7 +492,81 @@
       <div class="mini-tabs" role="group" aria-label="Whose bills">${tabs.map(([k, l]) => `<button type="button" data-act="bill-tab" data-key="${esc(k)}" aria-pressed="${state.billTab === k}">${esc(l)}</button>`).join('')}</div></div>
       <div id="bills" style="display:grid;gap:12px">${billsHtml()}</div>`;
 
-    return summary + payCheckCard() + interestCard() + transferCard() + debtCard() + quick + accts + bills;
+    return summary + payCheckCard() + billsDueCard() + interestCard() + transferCard() + debtCard() + quick + accts + bills;
+  }
+
+  // ---------- bills & subscriptions ----------
+
+  /** Bills for the wallet shown at the top: that person's, ones they pay, and shared ones. */
+  const billsFor = sel => state.M.bills.filter(b => sel === 'All' || b.person === sel || b.person === 'Shared' || b.paidBy === sel);
+  const billWhen = b => {
+    const st = E.billStatus(b, state.M.today);
+    return st.key === 'overdue' ? `<span class="tag bad">Overdue ${-st.days} day${st.days === -1 ? '' : 's'}</span>`
+      : st.key === 'today' ? '<span class="tag warn">Due today</span>'
+      : st.key === 'soon' ? `<span class="tag warn">Due ${st.days === 1 ? 'tomorrow' : 'in ' + st.days + ' days'}</span>`
+      : `<span class="muted">${dayLabel(b.date)}</span>`;
+  };
+  const billOf = id => state.M.bills.find(b => b.id === String(id));
+
+  function billRow(b) {
+    const whose = b.person === 'Shared' ? 'Shared' + (b.paidBy ? ' · ' + pName(b.paidBy) + ' pays' : '') : pName(b.person) + (b.paidBy && b.paidBy !== b.person ? ' · ' + pName(b.paidBy) + ' pays' : '');
+    const action = b.done ? '' : b.auto ? '<span class="tag good" title="Recorded automatically on the due date">Auto</span>'
+      : `<button type="button" class="btn primary sm" data-act="bill-pay" data-key="${esc(b.id)}">Pay</button>`;
+    return `<div class="tx" role="button" tabindex="0" data-act="edit" data-kind="bills" data-id="${esc(b.id)}">${tile(cIcon(b.category), cColour(b.category), 'round')}
+      <div class="tx-main"><span class="tx-title">${esc(b.title)}</span><span class="tx-sub">${b.done ? 'Paid ' + (b.lastPaid ? dayLabel(b.lastPaid) : '') : billWhen(b) + ' · ' + esc(E.BILL_REPEATS[b.repeat].short)} · ${esc(whose)}</span></div>
+      <div class="tx-amt">${b.amount ? money(b.amount) : '<span class="muted">—</span>'}</div>${action}</div>`;
+  }
+
+  /** Home: bills that are overdue or inside their reminder window (at least 3 days ahead). */
+  function billsDueCard() {
+    const list = billsFor(state.person).filter(b => !b.done && E.billStatus(b, state.M.today).key !== 'later');
+    if (!list.length) return '';
+    return `<section class="card flush"><div class="card-head"><h2>🗓️ Bills due</h2><button class="btn link" data-act="view" data-key="bills">All ${ico('arrow', 16)}</button></div>
+      <div class="tx-list">${list.map(billRow).join('')}</div></section>`;
+  }
+
+  function viewBills() {
+    const M = state.M;
+    const sel = state.person;
+    const all = billsFor(sel);
+    const active = all.filter(b => !b.done);
+    const done = all.filter(b => b.done);
+    const share = b => (sel === 'All' || b.person === sel ? 1 : b.person === 'Shared' ? (sel === M.codes[0] ? (blank(b.splitPct) ? M.general.sharedSplit : b.splitPct) : 1 - (blank(b.splitPct) ? M.general.sharedSplit : b.splitPct)) : 0);
+    const perMonth = sumOf(active, b => b.perMonth * share(b));
+    const hero = `<section class="hero"><div class="label">${sel === 'All' ? 'Our' : esc(pName(sel)) + '’s'} bills &amp; subscriptions</div>
+      <div class="big">${money(perMonth)}<span style="font-size:16px;font-weight:600"> a month</span></div>
+      <div class="myr">${active.length} active${active.filter(b => b.auto).length ? ' · ' + active.filter(b => b.auto).length + ' recorded automatically' : ''}</div>
+      <div class="row" style="margin-top:14px"><button class="btn primary" data-act="bill-new">＋ Add a bill</button></div></section>`;
+    if (!all.length) {
+      return hero + `<section class="card">${empty('🗓️', '<strong>Never miss a payment</strong><br>Add rent, phone, internet, Netflix or insurance. Choose when it’s due and when to remind you.',
+        '<button class="btn primary" data-act="bill-new">＋ Add a bill</button>')}</section>`;
+    }
+    const groups = [['Overdue', b => E.billStatus(b, M.today).key === 'overdue'], ['Due in the next 7 days', b => { const d = E.billStatus(b, M.today).days; return d >= 0 && d <= 7; }],
+      ['Later', b => E.billStatus(b, M.today).days > 7]];
+    const cards = groups.map(([title, test]) => {
+      const list = active.filter(test);
+      return list.length ? `<section class="card flush"><div class="card-head"><h2>${title}</h2><span class="hint">${money(sumOf(list, b => b.amount))}</span></div>
+        <div class="tx-list">${list.map(billRow).join('')}</div></section>` : '';
+    }).join('');
+    const finished = done.length ? `<section class="card"><details class="more"><summary>Finished one-time bills (${done.length})</summary>
+      <div class="tx-list" style="margin:6px -18px 0">${done.map(billRow).join('')}</div></details></section>` : '';
+    const tip = `<p class="muted small"><strong>Pay</strong> opens the expense form filled in from the bill; saving it moves the bill to its next due date.
+      <strong>Auto</strong> bills are recorded by themselves on the due date (good for direct debits and subscriptions). With phone notifications on, you get a reminder before each bill is due (you choose when, in each bill).</p>`;
+    return hero + (active.length ? cards : `<section class="card">${empty('🎉', 'All paid.')}</section>`) + finished + tip;
+  }
+
+  /** The Pay form: an expense filled in from the bill. Saving it also moves the bill on. */
+  function payBill(id) {
+    const b = billOf(id);
+    if (!b || b.done) return;
+    const rec = Object.assign(newRecord('expenses'), E.billExpense(b, state.M.today), { amount: b.amount || '' });
+    openForm('expenses', rec, { isNew: true, bill: b.id });
+  }
+
+  /** The bill as saved (Sheet values), moved on to its next due date. */
+  function billMovedOn(id, paidOn) {
+    const raw = (state.app.data.bills || []).find(r => String(r.id) === String(id));
+    return E.billPaid(raw, paidOn);
   }
 
   /** From the 1st: ask for last month's bank interest until it's recorded (or dismissed). */
@@ -1571,6 +1653,7 @@
         <li><strong>Tuesday ${hour(sch.payHour)}</strong>: did you get paid? Tap to record it (your usual days are filled in).</li>
         <li><strong>Daily ${hour(sch.remindHour)}</strong>: pay still to move to Self Saving / Shared Saving, until you tap ✅ Done.</li>
         <li><strong>1st of the month, ${hour(sch.interestHour)}</strong>: record last month’s bank interest.</li>
+        <li><strong>Bills &amp; subscriptions</strong>: before each one is due, at the time you chose in the bill. Tap to pay and record it.</li>
         <li><strong>Split bills</strong>: as soon as the other person adds a bill they paid, on Tuesdays, and when they tap <strong>Remind</strong>.</li></ul>`;
     const phones = status.phones.length ? `<h3 style="margin-top:12px">Phones with notifications</h3>${status.phones.map(ph => `<div class="spread" style="padding:6px 0;border-top:1px solid var(--line)">
         <span><strong>${esc(ph.name)}</strong>${ph.me ? ' <span class="tag good">this phone</span>' : ''}<div class="muted small">for ${esc(who(ph.person))}</div></span></div>`).join('')}` : '';
@@ -2073,6 +2156,11 @@
     if (kind === 'paybacks') {
       return { date, from: code, to: M.codes.find(c => c !== code) || code, amount: '', note: '' };
     }
+    if (kind === 'bills') {
+      const cat = M.categories.find(c => /bill|util|subscri/i.test(c.name)) || M.categories.find(c => c.name === 'Other') || M.categories[0] || {};
+      return { date: (keep && keep.date) || E.addDays(M.today, 7), title: '', amount: '', person: 'Shared', paidBy: code, category: cat.name, splitPct: '',
+        repeat: 'month', day: '', before: 1, hour: 9, auto: '', done: '', lastPaid: '', note: '' };
+    }
     if (kind === 'wallets') {
       return { date, name: '', currency: (keep && keep.currency) || 'AUD', type: '', owner: M.viewer, number: '', opening: '', colour: WALLET_COLOUR, badge: '', logo: '', note: '', closed: '' };
     }
@@ -2099,7 +2187,7 @@
   function openForm(kind, rec, opts) {
     const isNew = !rec;
     rec = Object.assign({}, rec || newRecord(kind));
-    if (kind === 'expenses') rec.splitPct = blank(rec.splitPct) ? '' : +(E.pct(rec.splitPct) * 100).toFixed(2);
+    if (kind === 'expenses' || kind === 'bills') rec.splitPct = blank(rec.splitPct) ? '' : +(E.pct(rec.splitPct) * 100).toFixed(2);
     let adjType = null;
     if (kind === 'adjustments') {
       const fa = (fundOf(rec.fromFund) || {}).account;
@@ -2117,7 +2205,7 @@
     }
     const myrSaved = rec.currency === 'MYR';
     state.form = {
-      kind, rec, payType,
+      kind, rec, payType, bill: (opts && opts.bill) || '', billDate: kind === 'bills' ? rec.date : '',
       isNew: opts && opts.isNew !== undefined ? opts.isNew : isNew,
       adjType: (opts && opts.adjType) || adjType,
       calc: {
@@ -2351,6 +2439,31 @@
         <label class="field"><span>Comes out of</span>${fundSelect('fund', r.fund, `Category’s fund: ${fIcon(catFund)} ${catFund} (${(fundOf(catFund) || {}).account || ''})`)}</label>
         <div class="two">${field('Date', 'date', r.date, 'type="date" required')}
           ${field('Description', 'description', r.description, 'type="text" placeholder="Optional"')}</div>`;
+    } else if (F.kind === 'bills') {
+      const split = blank(r.splitPct) ? Math.round(M.general.sharedSplit * 100) : r.splitPct;
+      const hourName = h => (h % 12 || 12) + (h < 12 ? ' am' : ' pm');
+      const saved = billOf(r.id);
+      body = `
+        ${field('What’s the bill?', 'title', r.title, 'type="text" maxlength="60" placeholder="e.g. Phone plan, Netflix" required')}
+        ${F.isNew ? `<div class="scroller">${BILL_IDEAS.map(([t]) => `<button type="button" class="filter-chip" data-act="bill-idea" data-key="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : ''}
+        ${keypad(false)}
+        <div class="field"><span>Whose bill?</span>${who(r.person, people.concat([['Shared', 'Shared']]))}</div>
+        <div class="field"><span>Who pays it?</span><input type="hidden" name="paidBy" value="${esc(r.paidBy || '')}">${who(r.paidBy, people, 'form-paidby')}</div>
+        ${r.person === 'Shared' ? `<div class="field"><span>Split: ${esc(pName(M.codes[0]))} <output id="split-out">${split}</output>% · ${esc(pName(M.codes[1]))} <output id="split-out2">${100 - split}</output>%</span>
+          <input name="splitPct" type="range" min="0" max="100" step="5" value="${esc(split)}" aria-label="${esc(pName(M.codes[0]))}'s share"></div>` : ''}
+        <div class="field"><span>Category when paid</span><input type="hidden" name="category" value="${esc(r.category)}">
+          <div class="cat-grid">${M.categories.map(c => `<button type="button" class="cat-chip" data-act="form-cat" data-key="${esc(c.name)}" aria-pressed="${c.name === r.category}" style="--c:${fColour(c.fund)}" title="${esc(c.fund)}"><span class="e">${esc(cIcon(c.name))}</span>${esc(c.name)}</button>`).join('')}</div></div>
+        <div class="two">${field(r.done === 'Yes' ? 'Due date' : 'Next due date', 'date', r.date, 'type="date" required')}
+          <label class="field"><span>Repeats</span><select name="repeat">${Object.keys(E.BILL_REPEATS).map(k => `<option value="${k}"${k === r.repeat ? ' selected' : ''}>${esc(E.BILL_REPEATS[k].label)}</option>`).join('')}</select></label></div>
+        <div class="two"><label class="field"><span>Remind me</span><select name="before">${BILL_BEFORE.map(([d, l]) => `<option value="${d}"${Number(r.before) === d ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
+          <label class="field"><span>At</span><select name="hour">${Array.from({ length: 17 }, (x, i) => i + 6).map(h => `<option value="${h}"${Number(r.hour) === h ? ' selected' : ''}>${hourName(h)}</option>`).join('')}</select></label></div>
+        <div class="field"><span>Record automatically on the due date?</span><input type="hidden" name="auto" value="${r.auto === 'Yes' ? 'Yes' : ''}">
+          <div class="seg" role="group" aria-label="Record automatically">${[['', 'No, I’ll tap Pay'], ['Yes', 'Yes · direct debit']].map(([v, l]) =>
+            `<button type="button" data-act="bill-auto" data-key="${v}" aria-pressed="${(r.auto === 'Yes' ? 'Yes' : '') === v}">${l}</button>`).join('')}</div></div>
+        ${saved && saved.done ? `<div class="field"><span>Status</span><input type="hidden" name="done" value="${r.done === 'Yes' ? 'Yes' : ''}">
+          <div class="seg" role="group" aria-label="Status">${[['Yes', '✅ Finished'], ['', '🔔 Remind me again']].map(([v, l]) =>
+            `<button type="button" data-act="bill-done" data-key="${v}" aria-pressed="${(r.done === 'Yes' ? 'Yes' : '') === v}">${l}</button>`).join('')}</div></div>` : ''}
+        ${field('Note', 'note', r.note, 'type="text" placeholder="Optional, e.g. account number"')}`;
     } else if (F.kind === 'paybacks') {
       body = `
         <div class="field"><span>Who gave the money?</span><input type="hidden" name="from" value="${esc(r.from)}"><input type="hidden" name="to" value="${esc(r.to)}">
@@ -2446,7 +2559,10 @@
     const walletTitle = { wallets: 'New account', walletChecks: 'Update balance', walletTransfers: 'Transfer' }[F.kind];
     const picking = F.kind === 'wallets' && !r.type; // choosing the kind of account: nothing to save yet
     const keepAccount = F.kind === 'wallets' && (wOf(r.id) || {}).linked; // the three bank accounts can't be deleted
-    const kindSwitch = F.kind === 'paybacks'
+    const payingBill = F.bill ? billOf(F.bill) : null;
+    const kindSwitch = payingBill ? `<h2 id="form-title">💳 Pay ${esc(payingBill.title)}</h2>`
+      : F.kind === 'bills' ? `<h2 id="form-title">🗓️ ${F.isNew ? 'New bill' : 'Edit bill'}</h2>`
+      : F.kind === 'paybacks'
       ? `<h2 id="form-title">💸 ${F.isNew ? 'Payback / lend' : 'Edit payback'}</h2>`
       : walletTitle && F.isNew ? `<h2 id="form-title">${walletTitle}</h2>`
       : F.isNew
@@ -2460,8 +2576,9 @@
           ${picking ? '' : `<div class="${F.kind === 'wallets' ? '' : 'receipt'}" id="form-preview"></div>
           <div class="sheet-actions">
             ${F.isNew || keepAccount ? '' : '<button type="button" class="btn danger" data-act="form-delete">Delete</button>'}
-            ${F.isNew && F.kind === 'expenses' ? '<button type="button" class="btn" data-act="form-save-more">Save &amp; add another</button>' : ''}
-            <button type="submit" class="btn primary grow" data-act="form-save">Save</button></div>`}
+            ${F.isNew && F.kind === 'expenses' && !payingBill ? '<button type="button" class="btn" data-act="form-save-more">Save &amp; add another</button>' : ''}
+            ${payingBill ? '<button type="button" class="btn" data-act="bill-skip" title="Moves the bill on without adding an expense">Paid, don’t record</button>' : ''}
+            <button type="submit" class="btn primary grow" data-act="form-save">${payingBill ? '✅ Paid · record it' : 'Save'}</button></div>`}
         </form></div>`;
     if ($('#calc-value')) calcSync();
     else updatePreview();
@@ -2481,6 +2598,26 @@
     const r = F.rec;
     const line = (a, b, cls) => `<div class="line"><span>${a}</span><span class="num${cls || ''}">${b}</span></div>`;
     const myrLine = () => (r.currency === 'MYR' && !blank(r.fxAmount) ? line('Typed in MYR', `${myr(Number(r.fxAmount))} ÷ ${r.fxRate}`) : '');
+    if (F.kind === 'bills') {
+      const b = { date: r.date, repeat: r.repeat, day: F.isNew || r.date !== F.billDate ? '' : r.day };
+      const next = E.billNext(b);
+      const before = Number(r.before) || 0;
+      const hourName = h => (h % 12 || 12) + (h < 12 ? ' am' : ' pm');
+      const amt = Number(r.amount) || 0;
+      let split = '';
+      if (r.person === 'Shared') {
+        const p1 = blank(r.splitPct) ? M.general.sharedSplit : Number(r.splitPct) / 100;
+        if (amt) split = line('Split', M.codes.map((c, i) => esc(pName(c)) + ' ' + money(i === 0 ? amt * p1 : amt - amt * p1)).join(' · '));
+        const o1 = $('#split-out');
+        const o2 = $('#split-out2');
+        if (o1) { o1.textContent = Math.round(p1 * 100); o2.textContent = 100 - Math.round(p1 * 100); }
+      }
+      el.innerHTML = split + (/^\d{4}-\d{2}-\d{2}$/.test(r.date || '') ? line('Due', dayLabel(r.date) + (next ? ` · then ${dayLabel(next)}` : ' · once')) +
+        line('Reminder', (before ? dayLabel(E.addDays(r.date, -before)) + ' and on the day' : 'On the day') + ', ' + hourName(Number(r.hour) || 9)) : '') +
+        (amt && E.BILL_REPEATS[r.repeat] && E.BILL_REPEATS[r.repeat].perMonth ? line('About', money(amt * E.BILL_REPEATS[r.repeat].perMonth) + ' a month') : '') +
+        `<span class="muted small">${r.auto === 'Yes' ? 'The expense is added by itself on each due date.' : 'Tap Pay when you’ve paid: it adds the expense and moves the bill on.'}</span>`;
+      return;
+    }
     if (F.kind === 'income' && F.payType === 'other') {
       const amt = Number(r.amount) || 0;
       const c = E.compute({ settings: state.app.data.settings, income: [{ id: 'preview', date: r.date, person: r.person, days: 0, otherNet: amt, intoFund: r.intoFund }] }).income[0];
@@ -2637,7 +2774,7 @@
       Object.keys(before).forEach(k => { state.app.data[k] = before[k]; });
       refreshLocal();
       toast('Couldn’t save: ' + errText(err), true);
-      if (reopen && !state.form) openForm(reopen.kind, reopen.rec, { isNew: reopen.isNew });
+      if (reopen && !state.form) openForm(reopen.kind, reopen.rec, { isNew: reopen.isNew, bill: reopen.bill });
       saveDone(null);
     });
   }
@@ -2646,7 +2783,7 @@
     readForm();
     const F = state.form;
     const payload = Object.assign({}, F.rec);
-    const needsAmount = F.kind !== 'wallets' && (F.kind !== 'income' || F.payType === 'other');
+    const needsAmount = F.kind !== 'wallets' && F.kind !== 'bills' && (F.kind !== 'income' || F.payType === 'other');
     if (needsAmount) {
       const amt = Number(payload.amount);
       // A balance can be 0 (an emptied account); every other amount can't.
@@ -2654,6 +2791,15 @@
       if (['adjustments', 'paybacks', 'walletTransfers'].indexOf(F.kind) >= 0 && amt < 0) { toast('The amount must be more than $0.', true); return; }
     }
     if (F.kind === 'wallets' && !payload.name) { toast('Give the account a name.', true); return; }
+    if (F.kind === 'bills') {
+      if (!payload.title) { toast('Give the bill a name.', true); return; }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.date || '')) { toast('Choose the due date.', true); return; }
+      if (payload.auto === 'Yes' && !(Number(payload.amount) > 0)) { toast('To record it automatically, enter the amount.', true); return; }
+      if (Number(payload.amount) < 0) { toast('The amount can’t be negative.', true); return; }
+      payload.splitPct = payload.person === 'Shared' && !blank(payload.splitPct) ? Number(payload.splitPct) / 100 : '';
+      if (F.isNew || payload.date !== F.billDate || !payload.day) payload.day = Number(payload.date.slice(8, 10)); // the usual day of the month
+      payload.amount = blank(payload.amount) ? 0 : payload.amount;
+    }
     if (F.kind === 'walletChecks') {
       const w = wOf(payload.walletId);
       if (w.linked) {
@@ -2694,6 +2840,7 @@
     }
     if (F.kind === 'income') delete payload.amount;
     if (F.kind !== 'expenses' && F.kind !== 'wallets' && !(F.kind === 'income' && F.payType === 'other')) {
+      // (bills are always in AUD)
       delete payload.currency;
       delete payload.fxAmount;
       delete payload.fxRate;
@@ -2702,11 +2849,15 @@
     if (!payload.id) payload.id = newId(F.kind);
     if (payload.person) store.set('lastPerson', payload.person);
     if (F.kind === 'expenses') store.set('lastCategory', payload.category);
-    const reopen = { kind: F.kind, rec: Object.assign({}, F.rec), isNew: F.isNew, payType: F.payType, adjType: F.adjType };
+    const reopen = { kind: F.kind, rec: Object.assign({}, F.rec), isNew: F.isNew, payType: F.payType, adjType: F.adjType, bill: F.bill };
     const label = F.kind === 'income' && F.payType === 'other' ? 'Income' : KIND_LABEL[F.kind];
     if (addAnother) openForm(F.kind, newRecord(F.kind, { date: payload.date, person: payload.person, category: payload.category }));
     else closeModal();
     if (reopen.kind === 'walletTransfers') persistBundle(transferItems(payload), isNew ? '✓ Transfer added' : '✓ Saved', reopen);
+    else if (reopen.bill) {
+      const moved = billMovedOn(reopen.bill, payload.date);
+      persistBundle([{ kind: 'expenses', record: payload }, { kind: 'bills', record: moved }], moved.done ? '✓ Paid' : '✓ Paid · next due ' + dayLabel(moved.date), reopen);
+    } else if (reopen.kind === 'bills') persist('bills', payload, isNew, (isNew ? '✓ Bill added' : '✓ Saved') + (payload.done ? '' : ' · due ' + dayLabel(payload.date)), reopen);
     else persist(reopen.kind, payload, isNew, isNew ? '✓ ' + label + ' added' : '✓ Saved', reopen);
   }
 
@@ -3299,6 +3450,26 @@
         render();
       }
     } else if (act === 'bill-tab') { state.billTab = key; render(); }
+    else if (act === 'bill-new') openForm('bills', null);
+    else if (act === 'bill-pay') payBill(key);
+    else if (act === 'bill-skip') {
+      const F = state.form;
+      const b = billOf(F.bill);
+      if (!b || !confirm('Mark “' + b.title + '” as paid without adding an expense?')) return;
+      closeModal();
+      const moved = billMovedOn(b.id, state.M.today);
+      persist('bills', moved, false, moved.done ? '✓ Marked as paid' : '✓ Marked as paid · next due ' + dayLabel(moved.date));
+    } else if (act === 'bill-idea') {
+      readForm();
+      const r = state.form.rec;
+      const idea = BILL_IDEAS.find(x => x[0] === key);
+      r.title = key;
+      const cat = state.M.categories.find(c => idea[1].test(c.name));
+      if (cat) r.category = cat.name;
+      r.repeat = idea[2];
+      renderForm();
+    } else if (act === 'bill-auto') { readForm(); state.form.rec.auto = key; renderForm(); }
+    else if (act === 'bill-done') { readForm(); state.form.rec.done = key; renderForm(); }
     else if (act === 'interest-record') openForm('interest', Object.assign(newRecord('interest'), { date: el.dataset.date }), { isNew: true });
     else if (act === 'interest-skip') { store.set('skip-interest-' + key, '1'); render(); }
     else if (act === 'settle-up') settleUp(); else if (act === 'split-add') {
@@ -3425,7 +3596,8 @@
         const rec = newRecord('expenses');
         rec.person = 'Shared';
         openForm('expenses', rec, { isNew: true });
-      } else if (state.view === 'wallet' && state.M.viewer && (state.person === 'All' || state.person === state.M.viewer)) walletTransferForm(state.walletId);
+      } else if (state.view === 'bills') openForm('bills', null);
+      else if (state.view === 'wallet' && state.M.viewer && (state.person === 'All' || state.person === state.M.viewer)) walletTransferForm(state.walletId);
       else openForm(defaultKind());
     }
     else if (act === 'edit') editEntry(el.dataset.kind, el.dataset.id);
@@ -3440,7 +3612,7 @@
         if (!before || String(F.rec.rate) === String(before.rate)) F.rec.rate = after.rate;
         if (!before || String(F.rec.hoursPerDay) === String(before.hoursPerDay)) F.rec.hoursPerDay = after.hoursPerDay;
       }
-      if (F.kind === 'expenses' && key !== 'Shared' && (!F.rec.paidBy || F.rec.paidBy === F.rec.person)) F.rec.paidBy = key; // usually you pay your own
+      if ((F.kind === 'expenses' || F.kind === 'bills') && key !== 'Shared' && (!F.rec.paidBy || F.rec.paidBy === F.rec.person)) F.rec.paidBy = key; // usually you pay your own
       F.rec.person = key;
       renderForm();
     } else if (act === 'form-cat') { readForm(); state.form.rec.category = key; state.form.rec.fund = ''; renderForm(); }
@@ -3610,7 +3782,7 @@
     openForm('paybacks', { date: state.M.today, from: S.debtor, to: S.creditor, amount: E.round2(S.amount), note: 'Paid back' }, { isNew: true });
   }
 
-  /** Forms a link (or a tapped notification) asks for: ?add=pay&person=…&date=…&days=…, ?add=interest, ?settle=1. */
+  /** Forms a link (or a tapped notification) asks for: ?add=pay&person=…&date=…&days=…, ?add=interest, ?pay=<bill id>, ?settle=1. */
   function openFromLink(P) {
     if (P.add === 'pay') {
       const rec = newRecord('income', { person: P.person, date: /^\d{4}-\d{2}-\d{2}$/.test(P.date || '') ? P.date : '' });
@@ -3618,6 +3790,8 @@
       openForm('income', rec, { isNew: true });
     } else if (P.add === 'interest') {
       openForm('interest', newRecord('interest'), { isNew: true });
+    } else if (P.pay && billOf(P.pay) && !billOf(P.pay).done) {
+      payBill(P.pay);
     } else if (P.settle && state.M.split.amount >= 0.01) {
       settleUp();
     }
