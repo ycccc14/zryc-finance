@@ -52,6 +52,9 @@ function TrackerEngine() {
     return n > 1 ? n / 100 : n;
   }
 
+  /** A bank account both of you own (Shared Saving, or any account with "Shared" in its name). */
+  const jointAccount = name => /shared/i.test(String(name || ''));
+
   const yes = v => v === true || /^(y|yes|true)$/i.test(String(v).trim());
 
   /** Round to cents, halves away from zero. */
@@ -483,10 +486,13 @@ function TrackerEngine() {
         warn('An expense on ' + r.date + ' has unknown person "' + r.person + '" and was skipped.');
         return null;
       }
+      // A shared expense paid from a joint account (e.g. Tuition Fund in Shared Saving) is paid by
+      // both of you already, so nobody owes anyone for it, whoever was picked as the payer.
+      const joint = r.person === SHARED && jointAccount(fundAccount[fund]);
       return {
         id: r.id, date: r.date, month: monthOf(r.date), fy: fyOf(r.date), person: r.person,
         amount, category, description: r.description || '', splitPct, fund, shares,
-        paidBy: byCode[r.paidBy] ? r.paidBy : '',
+        paidBy: !joint && byCode[r.paidBy] ? r.paidBy : '', joint,
       };
     }).filter(Boolean).sort(byDate);
 
@@ -737,7 +743,7 @@ function TrackerEngine() {
     };
     const savedWallets = data.wallets || [];
     const linkedWallets = !viewer ? [] : accountNames.map(a => {
-      const owner = /shared/i.test(a) ? SHARED : viewer;
+      const owner = jointAccount(a) ? SHARED : viewer;
       const id = 'link:' + owner + ':' + a;
       const look = savedWallets.find(r => String(r.id) === id) || {}; // the bank, colour and digits chosen for it
       return toWallet(Object.assign({ name: a }, look, { id, date: start, currency: 'AUD', type: 'bank', owner, opening: 0, closed: '', linked: a }));
@@ -923,7 +929,7 @@ function TrackerEngine() {
   }
 
   return {
-    compute, monthSummary, settingsOf, withhold, annualTax, autoScale, scaleFor, walletTransfer, walletMonth, WALLET_TYPES, FEE_CATEGORY,
+    compute, monthSummary, settingsOf, jointAccount, withhold, annualTax, autoScale, scaleFor, walletTransfer, walletMonth, WALLET_TYPES, FEE_CATEGORY,
     BILL_REPEATS, billsOf, billAud, billNext, billStatus, billExpense, billPaid, daysBetween,
     fyOf, fyMonths, fyName, normFy, monthOf, weekStart, addDays, addMonths, monthRange, todayISO,
     isBlank, num, pct, round2,

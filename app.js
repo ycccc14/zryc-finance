@@ -511,7 +511,7 @@
   const billAud = b => E.billAud(b, state.M.general.exchangeRate);
 
   function billRow(b) {
-    const whose = b.person === 'Shared' ? 'Shared' + (b.paidBy ? ' · ' + pName(b.paidBy) + ' pays' : '') : pName(b.person) + (b.paidBy && b.paidBy !== b.person ? ' · ' + pName(b.paidBy) + ' pays' : '');
+    const whose = b.person === 'Shared' ? 'Shared' + (jointSpend(b) ? ' · from ' + spendAccount(b) : b.paidBy ? ' · ' + pName(b.paidBy) + ' pays' : '') : pName(b.person) + (b.paidBy && b.paidBy !== b.person ? ' · ' + pName(b.paidBy) + ' pays' : '');
     const action = b.done ? '' : b.auto ? '<span class="tag good" title="Recorded automatically on the due date">Auto</span>'
       : `<button type="button" class="btn primary sm" data-act="bill-pay" data-key="${esc(b.id)}">Pay</button>`;
     return `<div class="tx" role="button" tabindex="0" data-act="edit" data-kind="bills" data-id="${esc(b.id)}">${tile(cIcon(b.category), cColour(b.category), 'round')}
@@ -1262,6 +1262,7 @@
     const settledCard = settled.length ? `<section class="card"><details class="more"><summary>Settled earlier (${settled.length})</summary>
       <div class="tx-list" style="margin:6px -18px 0">${settled.map(row).join('')}</div></details></section>` : '';
     const tip = `<p class="muted small">Add an expense and choose <strong>Who paid?</strong> If ${esc(pName(M.codes[0]))} pays a Shared bill, ${esc(pName(M.codes[1]))} owes their share; if one of you pays something that’s entirely the other’s, they owe all of it.
+      A Shared expense that comes out of a joint account (e.g. Tuition Fund in Shared Saving) is paid by both of you, so nothing is owed.
       The bill still counts in each person’s budget as usual. With phone notifications on, whoever owes gets a notification as soon as a bill is added, and a reminder on Tuesdays.</p>`;
     return hero + add + openCard + settledCard + tip;
   }
@@ -2190,7 +2191,7 @@
   function openForm(kind, rec, opts) {
     const isNew = !rec;
     rec = Object.assign({}, rec || newRecord(kind));
-    if (kind === 'expenses' || kind === 'bills') rec.splitPct = blank(rec.splitPct) ? '' : +(E.pct(rec.splitPct) * 100).toFixed(2);
+    if (kind === 'expenses' || kind === 'bills') rec.splitPct = blank(rec.splitPct) ? '' : +(E.pct(rec.splitPct) * 100).toFixed(8);
     let adjType = null;
     if (kind === 'adjustments') {
       const fa = (fundOf(rec.fromFund) || {}).account;
@@ -2218,6 +2219,7 @@
         fixed: ((kind === 'walletChecks' && wOf(rec.walletId)) || (kind === 'walletTransfers' && wOf(rec.fromId)) || {}).currency || '', // keypad shows this account's currency
       },
     };
+    if (kind === 'expenses' || kind === 'bills') splitStart(state.form);
     renderForm();
     $('#modal').hidden = false;
     document.body.style.overflow = 'hidden';
@@ -2238,6 +2240,91 @@
     const rec = (state.app.data[kind] || []).find(r => String(r.id) === String(id));
     if (kind === 'walletTransfers' && (!rec || !wOf(rec.fromId) || !wOf(rec.toId))) { toast('This is part of a private wallet transfer.', true); return; }
     if (rec) openForm(kind, rec);
+  }
+
+  /** The fund an expense (or a bill, once paid) comes out of, and that fund's bank account. */
+  const spendFund = r => r.fund || (state.M.categories.find(c => c.name === r.category) || {}).fund || '';
+  const spendAccount = r => (fundOf(spendFund(r)) || {}).account || '';
+  /** A Shared expense paid from a joint account (e.g. Tuition Fund in Shared Saving): both of you paid it, nobody owes. */
+  const jointSpend = r => r.person === 'Shared' && E.jointAccount(spendAccount(r));
+
+  /** "Who paid?": the two people, or "Both of you" when it comes out of a joint account. */
+  function paidByField(r, label, people) {
+    if (!jointSpend(r)) return `<div class="field"><span>${label}</span><input type="hidden" name="paidBy" value="${esc(r.paidBy || '')}">${who(r.paidBy, people, 'form-paidby')}</div>`;
+    return `<div class="field"><span>${label}</span><input type="hidden" name="paidBy" value="">
+      <div class="who" role="group"><button type="button" aria-pressed="true" style="--pc:${pColour('Shared')}">${avatar('Shared')}Both of you · ${esc(spendAccount(r))}</button></div>
+      <span class="muted small">It comes out of ${esc(spendAccount(r))}, so there’s nothing to pay back.</span></div>`;
+  }
+
+  /** A Shared split is either the default % or two amounts typed in. `splitFix` is the amount typed last: who (0 or 1) and how much. */
+  function splitStart(F) {
+    const r = F.rec;
+    const d = state.M.general.sharedSplit * 100;
+    F.splitMode = blank(r.splitPct) || Math.abs(Number(r.splitPct) - d) < 1e-6 ? 'even' : 'amount';
+    const total = calcValue(F.calc.expr);
+    F.splitFix = F.splitMode === 'amount' && isFinite(total) && total ? { who: 0, v: E.round2(total * Number(r.splitPct) / 100) } : null;
+  }
+
+  /** The two shares in the keypad's currency (the other one is the total minus the typed one), and the 1st person's %. */
+  function splitVals() {
+    const F = state.form;
+    const total = calcValue(F.calc.expr);
+    const fix = F.splitFix;
+    if (!fix || blank(fix.v) || !isFinite(Number(fix.v)) || !isFinite(total) || !total) return { a: '', b: '', pct: '', ok: false, total };
+    const v = E.round2(Number(fix.v));
+    const other = E.round2(total - v);
+    const a = fix.who === 0 ? v : other;
+    const b = fix.who === 0 ? other : v;
+    const ok = a * total >= 0 && b * total >= 0; // each between 0 and the total
+    return { a, b, ok, pct: ok ? (a / total) * 100 : '', total };
+  }
+
+  const splitShown = (v, i) => (state.form.splitFix && state.form.splitFix.who === i ? state.form.splitFix.v : blank(v.a) ? '' : i === 0 ? v.a : v.b);
+
+  function splitField(r) {
+    const M = state.M;
+    const F = state.form;
+    const d = Math.round(M.general.sharedSplit * 100);
+    const mode = F.splitMode === 'amount' ? 'amount' : 'even';
+    const cur = F.calcCurrency && F.calc.cur === 'MYR' ? 'MYR' : 'AUD';
+    const v = splitVals();
+    return `<div class="field"><span>Split</span><input type="hidden" name="splitPct" value="${esc(r.splitPct)}">
+      <div class="seg" role="group" aria-label="Split">${[['even', d === 50 ? '½ Half each' : `${esc(pName(M.codes[0]))} ${d}% · ${esc(pName(M.codes[1]))} ${100 - d}%`], ['amount', '✏️ Different amounts']].map(([k, l]) =>
+        `<button type="button" data-act="split-mode" data-key="${k}" aria-pressed="${mode === k}">${l}</button>`).join('')}</div>
+      ${mode === 'amount' ? `<div class="two" style="margin-top:8px">${M.codes.slice(0, 2).map((c, i) =>
+        `<label class="field"><span>${esc(pName(c))} pays (${cur})</span><input id="split-${i}" type="number" step="0.01" inputmode="decimal" placeholder="0.00" value="${esc(splitShown(v, i))}"></label>`).join('')}</div>` : ''}</div>`;
+  }
+
+  /** After the total or a share changes: fill in the other share and the hidden %. */
+  function splitSync() {
+    const F = state.form;
+    if (!F || F.splitMode !== 'amount') return;
+    const v = splitVals();
+    [0, 1].forEach(i => {
+      const el = $('#split-' + i);
+      if (el && el !== document.activeElement) el.value = splitShown(v, i);
+    });
+    F.rec.splitPct = v.ok ? v.pct : '';
+    const hid = $('#entry-form [name="splitPct"]');
+    if (hid) hid.value = F.rec.splitPct;
+  }
+
+  /** Descriptions used before, most used first: this category's, topped up with others (for the quick picks), and all (for typing). */
+  function descriptionPicks(category) {
+    const seen = {};
+    (state.M.expenses || []).forEach(x => {
+      const text = String(x.description || '').trim();
+      if (!text || /^E-wt-/.test(String(x.id)) || x.category === E.FEE_CATEGORY) return;
+      const k = text.toLowerCase();
+      const s = seen[k] || (seen[k] = { text, n: 0, last: '', cats: {} });
+      s.n++;
+      s.cats[x.category] = (s.cats[x.category] || 0) + 1;
+      if (x.date >= s.last) { s.last = x.date; s.text = text; }
+    });
+    const all = Object.keys(seen).map(k => seen[k]).sort((a, b) => b.n - a.n || (a.last < b.last ? 1 : a.last > b.last ? -1 : 0));
+    all.forEach(s => { s.cat = s.cats[category] ? category : Object.keys(s.cats).sort((a, b) => s.cats[b] - s.cats[a])[0]; });
+    const here = all.filter(s => s.cats[category]).slice(0, 6);
+    return { top: here.concat(all.filter(s => !s.cats[category]).slice(0, 6 - here.length)), all: all.slice(0, 80) };
   }
 
   const who = (value, options, act) => `<div class="who" role="group">${options.map(([code, label]) =>
@@ -2364,6 +2451,7 @@
     }
     const audEl = $('#calc-aud');
     if (audEl) audEl.textContent = isFinite(aud) ? money(aud) : '—';
+    splitSync();
     updatePreview();
   }
 
@@ -2398,6 +2486,10 @@
     const people = M.codes.map(c => [c, pName(c)]);
     let body = '';
     F.calcCurrency = false;
+    if (F.kind === 'expenses' || F.kind === 'bills') {
+      if (jointSpend(r)) { if (r.paidBy) { F.paidByWas = r.paidBy; r.paidBy = ''; } }
+      else if (!r.paidBy && F.paidByWas) { r.paidBy = F.paidByWas; F.paidByWas = ''; }
+    }
     if (F.kind === 'income') {
       const p = personOf(r.person) || {};
       const typeSeg = F.isNew ? `<div class="seg" role="group" aria-label="Income type">${[['wages', '💼 Wages'], ['other', '💰 Other income']].map(([k, l]) =>
@@ -2429,21 +2521,23 @@
             ${field('Note', 'note', r.note, 'type="text"')}</div></details>`;
       }
     } else if (F.kind === 'expenses') {
-      const split = blank(r.splitPct) ? Math.round(M.general.sharedSplit * 100) : r.splitPct;
       const catFund = (M.categories.find(c => c.name === r.category) || {}).fund || '';
+      const picks = descriptionPicks(r.category);
+      const typed = String(r.description || '').trim().toLowerCase();
       body = `
         ${keypad(true)}
         <div class="field"><span>Whose expense?</span>${who(r.person, people.concat([['Shared', 'Shared']]))}</div>
-        <div class="field"><span>Who paid?</span><input type="hidden" name="paidBy" value="${esc(r.paidBy || '')}">${who(r.paidBy, people, 'form-paidby')}</div>
-        ${r.person === 'Shared' ? `<div class="field"><span>Split: ${esc(pName(M.codes[0]))} <output id="split-out">${split}</output>% · ${esc(pName(M.codes[1]))} <output id="split-out2">${100 - split}</output>%</span>
-          <input name="splitPct" type="range" min="0" max="100" step="5" value="${esc(split)}" aria-label="${esc(pName(M.codes[0]))}'s share"></div>` : ''}
+        ${paidByField(r, 'Who paid?', people)}
+        ${r.person === 'Shared' ? splitField(r) : ''}
         <div class="field"><span>Category</span><input type="hidden" name="category" value="${esc(r.category)}">
           <div class="cat-grid">${M.categories.map(c => `<button type="button" class="cat-chip" data-act="form-cat" data-key="${esc(c.name)}" aria-pressed="${c.name === r.category}" style="--c:${fColour(c.fund)}" title="${esc(c.fund)}"><span class="e">${esc(cIcon(c.name))}</span>${esc(c.name)}</button>`).join('')}</div></div>
         <label class="field"><span>Comes out of</span>${fundSelect('fund', r.fund, `Category’s fund: ${fIcon(catFund)} ${catFund} (${(fundOf(catFund) || {}).account || ''})`)}</label>
         <div class="two">${field('Date', 'date', r.date, 'type="date" required')}
-          ${field('Description', 'description', r.description, 'type="text" placeholder="Optional"')}</div>`;
+          ${field('Description', 'description', r.description, 'type="text" placeholder="Optional" list="desc-list" autocomplete="off"')}</div>
+        <datalist id="desc-list">${picks.all.map(s => `<option value="${esc(s.text)}"></option>`).join('')}</datalist>
+        ${F.isNew && !F.bill && picks.top.length ? `<div class="field"><span>Used before</span><div class="scroller">${picks.top.map(s =>
+          `<button type="button" class="filter-chip" data-act="desc-pick" data-key="${esc(s.text)}" data-cat="${esc(s.cat)}" aria-pressed="${s.text.toLowerCase() === typed}">${esc(cIcon(s.cat))} ${esc(s.text)}</button>`).join('')}</div></div>` : ''}`;
     } else if (F.kind === 'bills') {
-      const split = blank(r.splitPct) ? Math.round(M.general.sharedSplit * 100) : r.splitPct;
       const hourName = h => (h % 12 || 12) + (h < 12 ? ' am' : ' pm');
       const saved = billOf(r.id);
       body = `
@@ -2451,9 +2545,8 @@
         ${F.isNew ? `<div class="scroller">${BILL_IDEAS.map(([t]) => `<button type="button" class="filter-chip" data-act="bill-idea" data-key="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : ''}
         ${keypad(true)}
         <div class="field"><span>Whose bill?</span>${who(r.person, people.concat([['Shared', 'Shared']]))}</div>
-        <div class="field"><span>Who pays it?</span><input type="hidden" name="paidBy" value="${esc(r.paidBy || '')}">${who(r.paidBy, people, 'form-paidby')}</div>
-        ${r.person === 'Shared' ? `<div class="field"><span>Split: ${esc(pName(M.codes[0]))} <output id="split-out">${split}</output>% · ${esc(pName(M.codes[1]))} <output id="split-out2">${100 - split}</output>%</span>
-          <input name="splitPct" type="range" min="0" max="100" step="5" value="${esc(split)}" aria-label="${esc(pName(M.codes[0]))}'s share"></div>` : ''}
+        ${paidByField(r, 'Who pays it?', people)}
+        ${r.person === 'Shared' ? splitField(r) : ''}
         <div class="field"><span>Category when paid</span><input type="hidden" name="category" value="${esc(r.category)}">
           <div class="cat-grid">${M.categories.map(c => `<button type="button" class="cat-chip" data-act="form-cat" data-key="${esc(c.name)}" aria-pressed="${c.name === r.category}" style="--c:${fColour(c.fund)}" title="${esc(c.fund)}"><span class="e">${esc(cIcon(c.name))}</span>${esc(c.name)}</button>`).join('')}</div></div>
         <div class="two">${field(r.done === 'Yes' ? 'Due date' : 'Next due date', 'date', r.date, 'type="date" required')}
@@ -2616,9 +2709,7 @@
       if (r.person === 'Shared') {
         const p1 = blank(r.splitPct) ? M.general.sharedSplit : Number(r.splitPct) / 100;
         if (amt) split = line('Split', M.codes.map((c, i) => esc(pName(c)) + ' ' + money(i === 0 ? amt * p1 : amt - amt * p1)).join(' · '));
-        const o1 = $('#split-out');
-        const o2 = $('#split-out2');
-        if (o1) { o1.textContent = Math.round(p1 * 100); o2.textContent = 100 - Math.round(p1 * 100); }
+        if (jointSpend(r)) split += line('🤝 Paid by', 'Both of you · nothing owed');
       }
       if (r.currency === 'MYR' && !blank(r.fxAmount)) split = line('Typed in MYR', `${myr(Number(r.fxAmount))} ÷ ${r.fxRate}`) + split;
       el.innerHTML = split + (/^\d{4}-\d{2}-\d{2}$/.test(r.date || '') ? line('Due', dayLabel(r.date) + (next ? ` · then ${dayLabel(next)}` : ' · once')) +
@@ -2655,9 +2746,7 @@
       if (r.person === 'Shared') {
         const p1 = blank(r.splitPct) ? M.general.sharedSplit : Number(r.splitPct) / 100;
         split = line('Split', M.codes.map((c, i) => esc(pName(c)) + ' ' + money(i === 0 ? amt * p1 : amt - amt * p1)).join(' · '));
-        const o1 = $('#split-out');
-        const o2 = $('#split-out2');
-        if (o1) { o1.textContent = Math.round(p1 * 100); o2.textContent = 100 - Math.round(p1 * 100); }
+        if (jointSpend(r)) split += line('🤝 Paid by', 'Both of you · nothing owed');
       }
       if (r.paidBy && M.codes.length > 1) {
         const other = M.codes.find(c => c !== r.paidBy);
@@ -2800,6 +2889,13 @@
       if (['adjustments', 'paybacks', 'walletTransfers'].indexOf(F.kind) >= 0 && amt < 0) { toast('The amount must be more than $0.', true); return; }
     }
     if (F.kind === 'wallets' && !payload.name) { toast('Give the account a name.', true); return; }
+    if ((F.kind === 'expenses' || F.kind === 'bills') && payload.person === 'Shared' && F.splitMode === 'amount') {
+      const v = splitVals();
+      if (!v.total) { toast('Enter the total amount first.', true); return; }
+      if (!F.splitFix || blank(F.splitFix.v)) { toast('Enter how much each of you pays.', true); return; }
+      if (!v.ok) { toast('Each share must be between 0 and the total.', true); return; }
+      payload.splitPct = v.pct;
+    }
     if (F.kind === 'bills') {
       if (!payload.title) { toast('Give the bill a name.', true); return; }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.date || '')) { toast('Choose the due date.', true); return; }
@@ -3632,6 +3728,24 @@
       updatePreview();
     } else if (act === 'form-adjtype') { readForm(); state.form.adjType = key; renderForm(); }
     else if (act === 'form-paidby') { readForm(); state.form.rec.paidBy = key; renderForm(); }
+    else if (act === 'split-mode') {
+      readForm();
+      const F = state.form;
+      F.splitMode = key;
+      const total = calcValue(F.calc.expr);
+      const p1 = blank(F.rec.splitPct) ? state.M.general.sharedSplit : Number(F.rec.splitPct) / 100;
+      if (key === 'even') { F.rec.splitPct = ''; F.splitFix = null; }
+      else F.splitFix = isFinite(total) && total ? { who: 0, v: E.round2(total * p1) } : null;
+      renderForm();
+      if (key === 'amount') { const a = $('#split-0'); if (a) a.focus(); }
+    } else if (act === 'desc-pick') {
+      readForm();
+      const r = state.form.rec;
+      r.description = key;
+      const cat = el.dataset.cat;
+      if (cat && cat !== r.category && state.M.categories.some(c => c.name === cat)) { r.category = cat; r.fund = ''; } // the category it's usually in
+      renderForm();
+    }
     else if (act === 'form-from') { readForm(); state.form.rec.from = key; state.form.rec.to = state.M.codes.find(c => c !== key) || key; renderForm(); }
     else if (act === 'form-save-more') saveForm(true);
     else if (act === 'form-delete') deleteForm();
@@ -3705,6 +3819,7 @@
       renderForm();
       return;
     }
+    if (state.form && state.form.kind === 'expenses' && el.name === 'fund') { readForm(); renderForm(); return; }
     if (state.form && (el.name === 'fromAccount' || el.name === 'toAccount' || el.name === 'account')) {
       // Keep the fund inside the chosen account.
       readForm();
@@ -3750,6 +3865,13 @@
   });
 
   document.addEventListener('input', e => {
+    if (state.form && /^split-[01]$/.test(e.target.id)) {
+      state.form.splitFix = { who: Number(e.target.id.slice(-1)), v: e.target.value };
+      splitSync();
+      readForm();
+      updatePreview();
+      return;
+    }
     if (state.form && state.form.calc) {
       if (e.target.id === 'calc-rate') { state.form.calc.rate = e.target.value; calcSync(); return; }
       if (e.target.name === 'amount') state.form.calc.expr = exprOf(e.target.value); // filled in some other way
@@ -3766,7 +3888,7 @@
       if (e.target.id === 'fx-aud') $('#fx-myr').value = (v * rate).toFixed(2);
       else $('#fx-aud').value = rate ? (v / rate).toFixed(2) : '';
     }
-    if (e.target.closest('#entry-form')) { readForm(); updatePreview(); }
+    if (e.target.closest('#entry-form')) { splitSync(); readForm(); updatePreview(); }
     if (e.target.closest('#g-alloc')) updateAllocTotals();
   });
 
