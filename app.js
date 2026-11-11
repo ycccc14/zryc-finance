@@ -746,7 +746,7 @@
     const hero = `<section class="hero">
       <div class="label">${saved < -0.004 ? 'Overspent' : 'Saved'} · ${sel === 'All' ? 'both of you' : esc(pName(sel))} · ${fyName(fy)}</div>
       <div class="big${neg(saved)}">${money(saved)}</div>
-      <div class="myr">≈ ${myr(saved * M.general.exchangeRate)} · ${rate(saved, T.income) === null ? 'no income yet' : rateText(rate(saved, T.income)) + ' of what came in'}</div>
+      <div class="myr">≈ ${myr(saved * M.general.exchangeRate)} · ${rate(saved, T.income) === null ? 'no income yet' : rateText(rate(saved, T.income)) + ' of income'}</div>
       <div class="hero-stats">
         <div class="hero-stat"><div class="k">In</div><div class="v">${money(T.income)}</div></div>
         <div class="hero-stat"><div class="k">Spent</div><div class="v">${money(T.spent)}</div></div>
@@ -778,7 +778,7 @@
     const head = '<tr><th class="sticky">Month</th><th class="num">In</th><th class="num">Spent</th><th class="num">Saved</th></tr>';
     const body = months.slice().reverse().map(m => row(MONTHS[+m.slice(5, 7) - 1] + (m === nowMonth ? ' <span class="muted small">so far</span>' : ''), of(sel, m),
       ` class="click" data-act="saved-month" data-key="${m}" title="See ${fmtMonth(m)} spending"`)).join('');
-    const monthCard = `<section class="card"><div class="card-head"><h2>Month by month</h2><span class="hint">${fyName(fy)} · tap a month for its spending</span></div>
+    const monthCard = `<section class="card"><div class="card-head"><h2>Monthly</h2><span class="hint">${fyName(fy)} · tap a month for its spending</span></div>
       ${months.length ? `<div class="chart-box"><canvas id="ch-saved" role="img" aria-label="Money in, spent and saved each month in ${fyName(fy)}"></canvas></div>
         ${table(head, body, row('Total', T, ' class="total"'))}` : empty('📊', `Nothing in ${fyName(fy)} yet.`)}
       <p class="muted small"><strong>In</strong> = net pay + other income + bank interest. <strong>Spent</strong> = expenses (your share of Shared ones).
