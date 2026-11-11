@@ -619,11 +619,11 @@
     return `<section class="card" style="border:2px solid var(--brand-deep)"><div class="card-head"><h2>💼 Pay check</h2></div>${rows}</section>`;
   }
 
-  /** Pays from the last 3 weeks whose savings transfers aren't marked done. */
+  /** Pays (wages, not other income) from the last 3 weeks whose savings transfers aren't marked done. */
   function transferCard() {
     const M = state.M;
     const from = E.addDays(M.today, -21);
-    const pending = M.income.filter(r => !r.transferred && r.date >= from && r.date <= M.today && (state.person === 'All' || r.person === state.person));
+    const pending = M.income.filter(r => r.isPay && !r.transferred && r.date >= from && r.date <= M.today && (state.person === 'All' || r.person === state.person));
     if (!pending.length) return '';
     const living = fundOf('Living Expenses') || M.funds[0];
     const targets = M.accounts.filter(a => !living || a !== living.account);

@@ -463,6 +463,7 @@ function TrackerEngine() {
         taxDiff: hasActual ? round2(actualTax - calcTax) : 0,
         otherNet, intoFund, otherTaxable, net, superRate, superAmt: round2(gross * superRate), alloc, note: r.note || '',
         transferred: validDate(String(r.transferred || '')) ? r.transferred : '',
+        isPay: gross > 0, // wages; other income alone (gift, refund…) isn't moved to the savings accounts
       };
     }).filter(Boolean).sort(byDate);
 
