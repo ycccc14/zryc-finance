@@ -1392,7 +1392,7 @@
     const list = activity({ interest: true }).filter(it => (M.interest.find(r => r.id === it.id) || {}).fy === fy);
     return hero + chips + monthly + `<section class="card flush"><div class="card-head"><h2>Entries</h2><span class="hint">Tap to edit</span></div>
       ${list.length ? txRows(list) : empty('🏦', `No interest recorded for ${fyName(fy)} yet.`, addBtn('interest', 'Record interest'))}</section>
-      <p class="muted small">Interest is added to the fund you choose (so it shows in the account balance) and counts as taxable income in the year-end tax estimate. Interest on the joint Shared Saving account is split ${pctf(M.general.sharedSplit)} / ${pctf(1 - M.general.sharedSplit)} unless you pick one person.</p>`;
+      <p class="muted small">Interest isn’t split by the budget %: all of it goes into one fund, ${esc(E.interestFundIn('Self Saving', M.funds) || 'Savings')} for Self Saving and ${esc(E.interestFundIn('Shared Saving', M.funds) || 'Tuition Fund')} for Shared Saving (so it shows in the account balance) and counts as taxable income in the year-end tax estimate. Interest on the joint Shared Saving account is split ${pctf(M.general.sharedSplit)} / ${pctf(1 - M.general.sharedSplit)} unless you pick one person.</p>`;
   }
 
   // ======================================================================
@@ -2252,7 +2252,7 @@
     }
     if (kind === 'interest') {
       const acct = interestAccounts().indexOf('Self Saving') >= 0 ? 'Self Saving' : interestAccounts()[0] || M.accounts[0];
-      return { date, person: code, fund: fundsIn(acct)[0] || M.fundNames[0], amount: '', note: '' };
+      return { date, person: code, fund: E.interestFundIn(acct, M.funds) || M.fundNames[0], amount: '', note: '' };
     }
     return { date, person: code, fromFund: M.fundNames[0], toFund: M.fundNames[1] || '', amount: '', note: '' };
   }
@@ -2275,7 +2275,10 @@
       rec.fromAccount = fa || state.M.accounts[0];
       rec.toAccount = ta || state.M.accounts[1] || state.M.accounts[0];
     }
-    if (kind === 'interest') rec.account = (fundOf(rec.fund) || {}).account || interestAccounts()[0];
+    if (kind === 'interest') {
+      rec.account = (fundOf(rec.fund) || {}).account || interestAccounts()[0];
+      rec.fund = E.interestFundIn(rec.account, state.M.funds) || rec.fund;
+    }
     // Income is either wages (days × hours) or other income (an amount).
     let payType = null;
     if (kind === 'income') {
@@ -2575,6 +2578,7 @@
         ${keypad(true)}
         <div class="field"><span>Who received it?</span>${who(r.person, people)}</div>
         <label class="field"><span>Put it into</span>${fundSelect('intoFund', r.intoFund, 'Split like pay (budget %)')}</label>
+        <p class="muted small" style="margin:-4px 0 0">Bank interest? ${F.isNew ? '<button type="button" class="btn link sm" data-act="form-kind" data-key="interest" style="padding:0;min-height:0">Record it as 🏦 Interest</button>' : 'Record it as 🏦 Interest'} instead: it goes straight into one fund, not split by the budget %.</p>
         <div class="field"><span>Counts as taxable income?</span><input type="hidden" name="otherTaxable" value="${taxable}">
           <div class="who" role="group">${[['', 'No · gift, refund, cashback'], ['Yes', 'Yes · side job, cash work']].map(([v, l]) =>
             `<button type="button" data-act="form-taxable" data-key="${v}" aria-pressed="${taxable === v}" style="padding-left:14px">${l}</button>`).join('')}</div></div>
@@ -2701,10 +2705,10 @@
           ${field('Note', 'note', r.note, 'type="text" placeholder="e.g. Wise, sent home"')}</div>`;
     } else if (F.kind === 'interest') {
       const acctOpts = `<select name="account">${interestAccounts().map(a => `<option value="${esc(a)}"${a === r.account ? ' selected' : ''}>${esc(aIcon(a))} ${esc(a)}</option>`).join('')}</select>`;
-      const fundOpts = `<select name="fund">${fundsIn(r.account).map(f => `<option value="${esc(f)}"${f === r.fund ? ' selected' : ''}>${esc(fIcon(f))} ${esc(f)}</option>`).join('')}</select>`;
+      const fundOpts = `<input type="hidden" name="fund" value="${esc(r.fund)}"><div class="fixed-fund">${esc(fIcon(r.fund))} ${esc(r.fund)}</div>`;
       body = `
         ${keypad(false)}
-        <div class="two"><label class="field"><span>Bank account</span>${acctOpts}</label><label class="field"><span>Goes into fund</span>${fundOpts}</label></div>
+        <div class="two"><label class="field"><span>Bank account</span>${acctOpts}</label><div class="field"><span>Goes into</span>${fundOpts}</div></div>
         <div class="field"><span>Whose interest?</span>${who(r.person, people.concat([['Shared', 'Shared']]))}</div>
         <div class="two">${field('Date paid', 'date', r.date, 'type="date" required')}
           ${field('Note', 'note', r.note, 'type="text" placeholder="e.g. October interest"')}</div>`;
@@ -2870,7 +2874,7 @@
       const p1 = M.general.sharedSplit;
       const split = r.person === 'Shared' ? M.codes.map((c, i) => esc(pName(c)) + ' ' + money(i === 0 ? amt * p1 : amt - amt * p1)).join(' · ') : esc(pName(r.person)) + ' ' + money(amt);
       el.innerHTML = line(`${esc(aIcon(r.account))} ${esc(r.account)} · ${esc(r.fund)}`, '+' + money(amt), ' pos') +
-        line('Taxable income ' + fyName(fy), split) + '<span class="muted small">Added to the fund’s balance and to the year-end tax estimate.</span>';
+        line('Taxable income ' + fyName(fy), split) + '<span class="muted small">All of it goes into this one fund (not split by the budget %), and into the year-end tax estimate.</span>';
     } else {
       const amt = money(Number(r.amount) || 0);
       const acctOf = f => esc((fundOf(f) || {}).account || '');
@@ -3909,7 +3913,8 @@
       readForm();
       const r = state.form.rec;
       const side = el.name === 'fromAccount' ? 'fromFund' : el.name === 'toAccount' ? 'toFund' : 'fund';
-      if (fundsIn(el.value).indexOf(r[side]) < 0) r[side] = fundsIn(el.value)[0] || '';
+      if (el.name === 'account') r.fund = E.interestFundIn(el.value, state.M.funds) || fundsIn(el.value)[0] || ''; // interest: the account's one fund
+      else if (fundsIn(el.value).indexOf(r[side]) < 0) r[side] = fundsIn(el.value)[0] || '';
       // Interest on the joint account belongs to both; personal accounts to one person.
       if (el.name === 'account') r.person = /shared/i.test(el.value) ? 'Shared' : (r.person === 'Shared' ? state.M.codes[0] : r.person);
       renderForm();

@@ -55,6 +55,17 @@ function TrackerEngine() {
   /** A bank account both of you own (Shared Saving, or any account with "Shared" in its name). */
   const jointAccount = name => /shared/i.test(String(name || ''));
 
+  /**
+   * The one fund a bank account's interest goes into (it isn't split by the budget %): Savings for a
+   * personal account, Tuition Fund for a joint one, or the account's first fund if that one isn't there.
+   * `funds` is [{ name, account }].
+   */
+  function interestFundIn(account, funds) {
+    const inAccount = (funds || []).filter(f => f.account === account).map(f => f.name);
+    const want = jointAccount(account) ? 'Tuition Fund' : 'Savings';
+    return inAccount.indexOf(want) >= 0 ? want : inAccount[0] || '';
+  }
+
   const yes = v => v === true || /^(y|yes|true)$/i.test(String(v).trim());
 
   /** Round to cents, halves away from zero. */
@@ -520,8 +531,9 @@ function TrackerEngine() {
     // --- bank interest (adds to a fund, and counts as taxable income) ---
     const interest = (data.interest || []).map(r => {
       if (!validDate(r.date)) { warn('An interest entry has no valid date and was skipped.'); return null; }
-      const fund = String(r.fund || '').trim();
-      if (!fundAccount[fund]) { warn('Interest on ' + r.date + ' uses unknown fund "' + fund + '" and was skipped.'); return null; }
+      const saved = String(r.fund || '').trim();
+      if (!fundAccount[saved]) { warn('Interest on ' + r.date + ' uses unknown fund "' + saved + '" and was skipped.'); return null; }
+      const fund = interestFundIn(fundAccount[saved], S.funds); // whatever fund was picked, the account's interest fund gets it
       const amount = round2(num(r.amount));
       const shares = {};
       if (r.person === SHARED && codes.length >= 2) {
@@ -930,7 +942,7 @@ function TrackerEngine() {
   }
 
   return {
-    compute, monthSummary, settingsOf, jointAccount, withhold, annualTax, autoScale, scaleFor, walletTransfer, walletMonth, WALLET_TYPES, FEE_CATEGORY,
+    compute, monthSummary, settingsOf, jointAccount, interestFundIn, withhold, annualTax, autoScale, scaleFor, walletTransfer, walletMonth, WALLET_TYPES, FEE_CATEGORY,
     BILL_REPEATS, billsOf, billAud, billNext, billStatus, billExpense, billPaid, daysBetween,
     fyOf, fyMonths, fyName, normFy, monthOf, weekStart, addDays, addMonths, monthRange, todayISO,
     isBlank, num, pct, round2,
