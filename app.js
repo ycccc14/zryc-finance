@@ -237,6 +237,7 @@
     ['balances', 'Funds', 'wallet', viewBalances],
     ['interest', 'Interest', 'coin', viewInterest],
     ['expenses', 'Spending', 'receipt', viewExpenses],
+    ['saved', 'Saved', 'pie', viewSaved],
     ['income', 'Income', 'income', viewIncome],
     ['super', 'Super', 'spark', viewSuper],
     ['tax', 'Tax', 'file', viewTax],
@@ -248,7 +249,7 @@
   const GROUPS = [
     ['home', 'Home', 'home', ['dashboard', 'split', 'bills']],
     ['money', 'Savings', 'wallet', ['wallet', 'accounts', 'balances', 'interest']],
-    ['reports', 'Reports', 'chart', ['expenses', 'income', 'super', 'tax']],
+    ['reports', 'Reports', 'chart', ['expenses', 'saved', 'income', 'super', 'tax']],
     ['me', 'Me', 'user', ['me', 'budget', 'settings']],
   ];
   const groupOf = view => GROUPS.find(g => g[3].indexOf(view) >= 0) || GROUPS[0];
@@ -714,6 +715,80 @@
         <p class="muted small">Tax uses the ATO weekly withholding formula for the pay date’s financial year. Enter the payslip tax to use the real figure; any difference is flagged.</p></section>
       <section class="card flush"><div class="card-head"><h2>Pay log</h2><span class="hint">Tap to edit</span></div>
         ${log.length ? txRows(log) : empty('💼', 'Nothing yet.')}</section>`;
+  }
+
+  // ======================================================================
+  // Saved: money in, spent and what's left (saved) each month
+  // ======================================================================
+
+  function viewSaved() {
+    const M = state.M;
+    const sel = state.person;
+    const fy = state.fy;
+    const codes = showCodes();
+    const nowMonth = E.monthOf(M.today);
+    // The same figures as Home's Spent / In / Left: net pay + other income + interest, minus spending (each person's share).
+    const of = (k, m) => E.monthSummary(M, k, m);
+    const used = m => { const x = of(sel, m); return Math.abs(x.income) > 0.004 || Math.abs(x.spent) > 0.004; };
+    const months = E.fyMonths(fy).filter(m => (m < nowMonth && (M.monthly[m] || used(m))) || (m >= nowMonth && used(m)));
+    const whole = months.filter(m => m < nowMonth); // finished months, for the average
+    const sumFor = k => months.reduce((t, m) => { const s = of(k, m); t.income += s.income; t.spent += s.spent; return t; }, { income: 0, spent: 0 });
+    const rate = (saved, income) => (income > 0.004 ? saved / income : null);
+    const rateText = r => (r === null ? '—' : pctf(r, 0));
+    const T = sumFor(sel);
+    const saved = T.income - T.spent;
+    const avgOver = whole.length ? whole : months;
+    const avg = avgOver.length ? avgOver.reduce((t, m) => t + of(sel, m).left, 0) / avgOver.length : 0;
+    const years = Object.keys(M.fyTotals).filter(y => M.fyTotals[y].by.All.count).sort().reverse();
+    const yearChips = `<div class="scroller" style="margin:0;padding:2px 0">${(years.indexOf(fy) < 0 ? [fy].concat(years) : years).map(y =>
+      `<button class="filter-chip" data-act="fy" data-key="${y}" aria-pressed="${y === fy}" style="padding-left:12px">${fyName(y)}</button>`).join('')}</div>`;
+
+    const hero = `<section class="hero">
+      <div class="label">${saved < -0.004 ? 'Overspent' : 'Saved'} · ${sel === 'All' ? 'both of you' : esc(pName(sel))} · ${fyName(fy)}</div>
+      <div class="big${neg(saved)}">${money(saved)}</div>
+      <div class="myr">≈ ${myr(saved * M.general.exchangeRate)} · ${rate(saved, T.income) === null ? 'no income yet' : rateText(rate(saved, T.income)) + ' of what came in'}</div>
+      <div class="hero-stats">
+        <div class="hero-stat"><div class="k">In</div><div class="v">${money(T.income)}</div></div>
+        <div class="hero-stat"><div class="k">Spent</div><div class="v">${money(T.spent)}</div></div>
+        <div class="hero-stat"><div class="k">Avg / month</div><div class="v${neg(avg)}">${money(avg)}</div></div></div></section>`;
+
+    chart('ch-saved', {
+      type: 'bar',
+      data: {
+        labels: months.map(m => MONTHS[+m.slice(5, 7) - 1]),
+        datasets: [
+          { type: 'bar', label: 'In', data: months.map(m => E.round2(of(sel, m).income)), backgroundColor: cssVar('--series-income'), borderRadius: 4, maxBarThickness: 18, order: 2 },
+          { type: 'bar', label: 'Spent', data: months.map(m => E.round2(of(sel, m).spent)), backgroundColor: cssVar('--series-spend'), borderRadius: 4, maxBarThickness: 18, order: 2 },
+          { type: 'line', label: 'Saved', data: months.map(m => E.round2(of(sel, m).left)), borderColor: cssVar('--ink'), backgroundColor: cssVar('--ink'), borderWidth: 2, tension: 0,
+            pointRadius: 3, pointHoverRadius: 5, pointBorderColor: cssVar('--card'), pointBorderWidth: 1, order: 1 },
+        ],
+      },
+      options: {
+        maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, tooltip: { callbacks: { label: ctx => ' ' + ctx.dataset.label + ': ' + money(ctx.parsed.y) } } },
+        scales: { y: { border: { display: false }, ticks: { callback: v => '$' + v.toLocaleString() } }, x: { grid: { display: false } } },
+      },
+    });
+
+    const row = (label, s, attrs) => {
+      const left = s.income - s.spent;
+      return `<tr${attrs || ''}><td class="sticky">${label}</td><td class="num">${dash(s.income)}</td><td class="num">${dash(s.spent)}</td>
+        <td class="num${neg(left)}"><strong>${money(left)}</strong><div class="muted small">${rateText(rate(left, s.income))}</div></td></tr>`;
+    };
+    const head = '<tr><th class="sticky">Month</th><th class="num">In</th><th class="num">Spent</th><th class="num">Saved</th></tr>';
+    const body = months.slice().reverse().map(m => row(MONTHS[+m.slice(5, 7) - 1] + (m === nowMonth ? ' <span class="muted small">so far</span>' : ''), of(sel, m),
+      ` class="click" data-act="saved-month" data-key="${m}" title="See ${fmtMonth(m)} spending"`)).join('');
+    const monthCard = `<section class="card"><div class="card-head"><h2>Month by month</h2><span class="hint">${fyName(fy)} · tap a month for its spending</span></div>
+      ${months.length ? `<div class="chart-box"><canvas id="ch-saved" role="img" aria-label="Money in, spent and saved each month in ${fyName(fy)}"></canvas></div>
+        ${table(head, body, row('Total', T, ' class="total"'))}` : empty('📊', `Nothing in ${fyName(fy)} yet.`)}
+      <p class="muted small"><strong>In</strong> = net pay + other income + bank interest. <strong>Spent</strong> = expenses (your share of Shared ones).
+        <strong>Saved</strong> = In − Spent, the same as <strong>Left</strong> on Home; under it, the % of In that was saved. Red means more went out than came in.
+        <strong>Avg / month</strong> counts finished months only.</p></section>`;
+
+    const people = codes.length > 1 ? `<section class="card"><div class="card-head"><h2>Each of you</h2><span class="hint">${fyName(fy)}</span></div>
+      ${table(head.replace('Month', 'Who'), codes.map(c => row(chip(c), sumFor(c))).join(''))}</section>` : '';
+
+    return yearChips + hero + monthCard + people;
   }
 
   // ======================================================================
@@ -3553,6 +3628,15 @@
         state.cat = '';
         renderKeepingPlace();
       }
+    } else if (act === 'saved-month') {
+      state.month = key;
+      state.fy = E.fyOf(key + '-01');
+      state.cat = '';
+      state.view = 'expenses';
+      store.set('view', 'expenses');
+      store.set('last-reports', 'expenses');
+      render();
+      window.scrollTo(0, 0);
     } else if (act === 'bill-tab') { state.billTab = key; renderKeepingPlace(); }
     else if (act === 'bill-new') openForm('bills', null);
     else if (act === 'bill-pay') payBill(key);
