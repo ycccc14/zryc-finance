@@ -174,9 +174,17 @@
   const pColour = code => (code === 'Shared' ? '#64748B' : (personOf(code) || {}).colour || '#888');
   const pName = code => (code === 'All' ? 'Both' : code === 'Shared' ? 'Shared' : (personOf(code) || {}).name || code);
   const initials = code => (code === 'Shared' ? '⇄' : pName(code).slice(0, 2).toUpperCase());
+  /** Initials colour on a person's fill: dark or white, whichever reads better (WCAG contrast). */
+  function avInk(hex) {
+    const n = parseInt(String(hex || '').replace('#', ''), 16);
+    if (!isFinite(n)) return '#fff';
+    const lin = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    const L = 0.2126 * lin(n >> 16 & 255) + 0.7152 * lin(n >> 8 & 255) + 0.0722 * lin(n & 255);
+    return (L + 0.05) / 0.05 > 1.05 / (L + 0.05) ? '#1A1A1A' : '#fff';
+  }
   const avatar = (code, cls) => (code === 'All'
     ? `<span class="av duo${cls ? ' ' + cls : ''}" aria-hidden="true"></span>`
-    : `<span class="av${cls ? ' ' + cls : ''}" style="--pc:${pColour(code)}" aria-hidden="true">${esc(initials(code))}</span>`);
+    : `<span class="av${cls ? ' ' + cls : ''}" style="--pc:${pColour(code)};color:${avInk(pColour(code))}" aria-hidden="true">${esc(initials(code))}</span>`);
   const chip = code => `<span class="chip">${avatar(code)}${esc(pName(code))}</span>`;
   const fundOf = name => state.M.funds.find(f => f.name === name);
   const fColour = name => (fundOf(name) || {}).colour || '#94A3B8';
@@ -230,8 +238,8 @@
   // [id, label, icon, render]
   const VIEWS = [
     ['dashboard', 'Home', 'home', viewDashboard],
-    ['split', 'Split bills', 'split', viewSplit],
-    ['bills', 'Subscriptions', 'calendar', viewBills],
+    ['split', 'Settle up', 'split', viewSplit],
+    ['bills', 'Bills', 'calendar', viewBills],
     ['wallet', 'Wallet', 'card', viewWallet],
     ['accounts', 'Accounts', 'bank', viewAccounts],
     ['balances', 'Funds', 'wallet', viewBalances],
@@ -309,9 +317,11 @@
     $('#brand-logo').innerHTML = appIcon(34);
     const g = groupOf(state.view);
     const sel = state.person;
-    const wallet = `<div class="wallet"><button type="button" data-act="wallet" data-key="-1" aria-label="Previous wallet">◀</button>${avatar(sel)}<span>${sel === 'All' ? 'Our wallet' : esc(pName(sel)) + '’s wallet'}</span><button type="button" data-act="wallet" data-key="1" aria-label="Next wallet">▶</button></div>`;
+    // Whose money every number shows: both of you, or one person. Always visible, one tap to change.
+    const wallet = `<div class="scope-seg" role="group" aria-label="Whose money to show">${['All'].concat(M.codes).map(c =>
+      `<button type="button" data-act="wallet" data-key="${esc(c)}" aria-pressed="${c === sel}" aria-label="${c === 'All' ? 'Both of you' : esc(pName(c))}">${avatar(c)}<span>${c === 'All' ? 'Both' : esc(pName(c))}</span></button>`).join('')}</div>`;
     const search = state.view === 'dashboard'
-      ? `<label class="search">${ico('search')}<span class="sr">Search bills</span><input id="search" type="search" placeholder="Search" autocomplete="off" value="${esc(state.q)}"></label>` : '';
+      ? `<label class="search">${ico('search')}<span class="sr">Search activity</span><input id="search" type="search" placeholder="Search" autocomplete="off" value="${esc(state.q)}"></label>` : '';
     const tabs = g[3].length > 1 ? `<nav class="band-tabs" aria-label="${g[1]}">${g[3].map(id =>
       `<button type="button" data-act="view" data-key="${id}"${id === state.view ? ' aria-current="page"' : ''}>${VIEWS.find(v => v[0] === id)[1]}</button>`).join('')}</nav>` : '';
     $('#band').innerHTML = `<div class="band-inner">
@@ -467,33 +477,42 @@
     const { spent, income, left, budget: b } = E.monthSummary(M, sel, m);
     const L = M.ledgers[sel];
 
+    // One answer first: what's left to spend from the everyday budget. In / Spent / Saved sit underneath.
+    const isNow = m === E.monthOf(M.today);
+    const daysInMonth = new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 0)).getUTCDate();
+    const daysLeft = isNow ? daysInMonth - +M.today.slice(8, 10) + 1 : 0;
+    const hasBudget = b.budget > 0.004;
+    const over = b.left < -0.004;
+    const of = `spent ${money(b.spent)} of ${money(b.budget)}`;
+    const pace = !hasBudget
+      ? (b.spent > 0.004 ? `Spent ${money(b.spent)} · no pay recorded for ${monthLong(m)} yet` : `Record ${monthLong(m)}’s pay to set the budget`)
+      : over ? `Over by <strong>${money(-b.left)}</strong> · ${of}`
+      : daysLeft > 0 ? `About <strong>${money(b.left / daysLeft)}</strong> a day for ${daysLeft} day${daysLeft === 1 ? '' : 's'} · ${of}`
+      : of.charAt(0).toUpperCase() + of.slice(1);
+    const barW = !hasBudget ? 0 : b.used > 1 ? 100 : clamp01(1 - b.used) * 100;
     const summary = `<section class="card summary">
       <div class="spread">${monthNav()}<button class="icon-btn" data-act="group" data-key="reports" aria-label="Open reports" title="Reports">${ico('chart', 18)}</button></div>
-      <div class="sum-line"><span class="sum-tag">Spent</span><span class="sum-big">${money(spent)}</span></div>
-      <div class="sum-pair"><div class="sum-line"><span class="sum-tag">In</span><span class="sum-mid in">${money(income)}</span></div>
-        <div class="sum-line"><span class="sum-tag">Left</span><span class="sum-mid${left < -0.004 ? ' neg' : ' in'}">${money(left)}</span></div></div>
-      <div class="budget-box" role="button" tabindex="0" data-act="view" data-key="budget">
-        <div class="spread"><span>${sel === 'All' ? 'Our' : esc(pName(sel)) + '’s'} everyday budget left <strong class="${b.left < -0.004 ? 'neg' : ''}" style="font-size:18px">${money(b.left)}</strong></span><span class="muted">›</span></div>
-        <div class="bar${b.used > 1 ? ' over' : ''}"><span style="--w:${(clamp01(1 - b.used) * 100).toFixed(1)}%;--c:var(--brand-deep)"></span></div>
-        <div class="muted small" style="margin-top:6px">Spent ${money(b.spent)} of ${money(b.budget)} put into ${b.funds.map(esc).join(', ')} this month</div></div>
+      <div class="sum-hero" role="button" tabindex="0" data-act="view" data-key="budget" aria-label="Left to spend ${money(b.left)}. Open the budget">
+        <div class="sum-k"><span>Left to spend <span class="muted">· ${b.funds.map(esc).join(', ')}</span></span><span class="scope">${avatar(sel)}${sel === 'All' ? 'Both of you' : esc(pName(sel))}</span></div>
+        <div class="sum-left${over ? ' neg' : !hasBudget ? ' none' : ''}">${money(b.left)}</div>
+        <div class="bar${over ? ' over' : ''}" role="img" aria-label="${hasBudget ? pctf(clamp01(1 - b.used)) + ' of the budget left' : 'No budget yet'}"><span style="--w:${barW.toFixed(1)}%;--c:var(--brand-deep)"></span></div>
+        <div class="sum-pace">${pace}</div></div>
+      <div class="sum-row">
+        <div><span class="k">In</span><span class="v in">${money(income)}</span></div>
+        <div><span class="k">Spent</span><span class="v">${money(spent)}</span></div>
+        <div><span class="k">${isNow ? 'Saved so far' : 'Saved'}</span><span class="v${left < -0.004 ? ' neg' : ''}">${money(left)}</span></div></div>
     </section>`;
 
-    const quick = `<section class="card quick">
-      <button type="button" data-act="add" data-key="income"><span class="q" style="--c:#16A34A">💼</span>Add pay</button>
-      <button type="button" data-act="add" data-key="expenses"><span class="q" style="--c:#3B82F6">🧾</span>Add expense</button>
-      <button type="button" data-act="acct-transfer" data-key="${esc(M.accounts[0] || '')}"><span class="q" style="--c:#F2B705">🔁</span>Transfer</button>
-      <button type="button" data-act="view" data-key="split"><span class="q" style="--c:#EC4899">⚖️</span>Split</button></section>`;
-
     const accts = `<div class="list-head"><h2>🏦 Accounts</h2><button class="btn link" data-act="view" data-key="accounts">See all ${ico('arrow', 16)}</button></div>
-      <div class="acct-strip">${M.accounts.map(a => `<div class="acct-mini" role="button" tabindex="0" data-act="view" data-key="accounts" style="border-top:3px solid ${aColour(a)}">
-        <div class="k">${esc(aIcon(a))} ${esc(a)}</div><div class="v${neg(L[a].balance)}">${money(L[a].balance)}</div></div>`).join('')}</div>`;
+      <div class="acct-strip">${M.accounts.map(a => `<div class="acct-mini" role="button" tabindex="0" data-act="view" data-key="accounts">
+        <div class="k"><span class="dot" style="--c:${aColour(a)}"></span>${esc(a)}</div><div class="v${neg(L[a].balance)}">${money(L[a].balance)}</div></div>`).join('')}</div>`;
 
     const tabs = [['All', 'All']].concat(M.codes.map(c => [c, pName(c)]), [['Shared', 'Shared']]);
-    const bills = `<div class="list-head"><h2>💛 <span id="bills-title">${state.q ? 'Search results' : monthLong(m) + ' bills'}</span></h2>
-      <div class="mini-tabs" role="group" aria-label="Whose bills">${tabs.map(([k, l]) => `<button type="button" data-act="bill-tab" data-key="${esc(k)}" aria-pressed="${state.billTab === k}">${esc(l)}</button>`).join('')}</div></div>
+    const bills = `<div class="list-head"><h2>💛 <span id="bills-title">${state.q ? 'Search results' : monthLong(m) + ' activity'}</span></h2>
+      <div class="mini-tabs" role="group" aria-label="Whose activity">${tabs.map(([k, l]) => `<button type="button" data-act="bill-tab" data-key="${esc(k)}" aria-pressed="${state.billTab === k}">${esc(l)}</button>`).join('')}</div></div>
       <div id="bills" style="display:grid;gap:12px">${billsHtml()}</div>`;
 
-    return summary + payCheckCard() + billsDueCard() + interestCard() + transferCard() + debtCard() + quick + accts + bills;
+    return summary + payCheckCard() + billsDueCard() + interestCard() + transferCard() + debtCard() + accts + bills;
   }
 
   // ---------- bills & subscriptions ----------
@@ -593,7 +612,7 @@
     return `<section class="card" role="button" tabindex="0" data-act="view" data-key="split"><div class="row" style="flex-wrap:nowrap">
       ${avatar(S.debtor, 'lg')}<span class="muted">→</span>${avatar(S.creditor, 'lg')}
       <div style="flex:1;min-width:0"><strong>${esc(pName(S.debtor))} owes ${esc(pName(S.creditor))} ${money(S.amount)}</strong>
-        <div class="muted small">Split bills · tap to settle up</div></div><span class="muted">›</span></div></section>`;
+        <div class="muted small">Tap to settle up</div></div><span class="muted">›</span></div></section>`;
   }
 
   /** Weekly pay check: from Tuesday, ask about anyone with no pay recorded for this week. */
@@ -669,7 +688,7 @@
     const shown = (q ? items.filter(it => it.text.toLowerCase().indexOf(q) >= 0) : items)
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)).slice(0, 200);
     if (!shown.length) {
-      return `<section class="card">${q ? empty('🔍', 'No bills match “' + esc(state.q) + '”.') : empty('🧾', `No bills in ${monthLong(state.month)} yet.`, addBtn('expenses', 'Add expense'))}</section>`;
+      return `<section class="card">${q ? empty('🔍', 'Nothing matches “' + esc(state.q) + '”.') : empty('🧾', `Nothing in ${monthLong(state.month)} yet.`, addBtn('expenses', 'Add expense'))}</section>`;
     }
     const days = [];
     shown.forEach(it => { if (!days.length || days[days.length - 1][0] !== it.date) days.push([it.date, []]); days[days.length - 1][1].push(it); });
@@ -783,7 +802,7 @@
       ${months.length ? `<div class="chart-box"><canvas id="ch-saved" role="img" aria-label="Money in, spent and saved each month in ${fyName(fy)}"></canvas></div>
         ${table(head, body, row('Total', T, ' class="total"'))}` : empty('📊', `Nothing in ${fyName(fy)} yet.`)}
       <p class="muted small"><strong>In</strong> = net pay + other income + bank interest. <strong>Spent</strong> = expenses (your share of Shared ones).
-        <strong>Saved</strong> = In − Spent, the same as <strong>Left</strong> on Home; under it, the % of In that was saved. Red means more went out than came in.
+        <strong>Saved</strong> = In − Spent, the same as <strong>Saved</strong> on Home; under it, the % of In that was saved. Red means more went out than came in.
         <strong>Avg / month</strong> counts finished months only.</p></section>`;
 
     const people = codes.length > 1 ? `<section class="card"><div class="card-head"><h2>Each of you</h2><span class="hint">${fyName(fy)}</span></div>
@@ -805,11 +824,15 @@
     const exp = M.expenses.filter(r => r.month === m && (sel === 'All' || r.shares[sel] !== undefined));
     const total = sumOf(exp, share);
     const prevM = E.addMonths(m, -1);
-    const prevTotal = M.monthly[prevM] ? M.monthly[prevM].spend[sel] : 0;
-    const delta = prevTotal > 0 ? (total - prevTotal) / prevTotal : null;
     const isNow = m === E.monthOf(M.today);
     const daysInMonth = new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 0)).getUTCDate();
     const daysSoFar = isNow ? +M.today.slice(8, 10) : daysInMonth;
+    // This month so far is compared with last month up to the same day, not with all of last month.
+    const prevUpTo = prevM + '-' + String(daysSoFar).padStart(2, '0');
+    const prevTotal = isNow ? sumOf(M.expenses.filter(r => r.month === prevM && r.date <= prevUpTo && (sel === 'All' || r.shares[sel] !== undefined)), share)
+      : M.monthly[prevM] ? M.monthly[prevM].spend[sel] : 0;
+    const delta = prevTotal > 0 ? (total - prevTotal) / prevTotal : null;
+    const prevName = MONTHS[+prevM.slice(5, 7) - 1];
     const days = Array.from({ length: daysInMonth }, (_, i) => m + '-' + String(i + 1).padStart(2, '0'));
     const dayTotals = days.map(d => sumOf(exp.filter(r => r.date === d), share));
     const peak = dayTotals.reduce((best, v, i) => (v > best[1] ? [i, v] : best), [-1, 0]);
@@ -818,12 +841,12 @@
 
     const kpi = `<section class="card"><div class="card-head"><h2>${monthLong(m)} spending</h2><span class="hint">${who}</span></div>
       <div class="kpi4">
-        <div><div class="k"><i style="--c:#3B82F6">M</i>This month</div><div class="v">${money(total)}</div>
-          ${delta === null ? '<div class="muted small">no data last month</div>' : `<span class="tag ${delta > 0 ? 'warn' : 'good'}">${delta > 0 ? '▲' : '▼'} ${pctf(Math.abs(delta), 1)} vs ${MONTHS[+prevM.slice(5, 7) - 1]}</span>`}</div>
-        <div><div class="k"><i style="--c:#A855F7">D</i>${isNow ? 'Today' : 'Biggest day'}</div>
+        <div><div class="k">${isNow ? 'So far' : 'This month'}</div><div class="v">${money(total)}</div>
+          ${delta === null ? `<div class="muted small">nothing to compare in ${prevName}</div>` : `<span class="tag ${delta > 0 ? 'warn' : 'good'}">${delta > 0 ? '▲' : '▼'} ${pctf(Math.abs(delta), 1)} vs ${isNow ? prevName + ' 1–' + daysSoFar : prevName}</span>`}</div>
+        <div><div class="k">${isNow ? 'Today' : 'Biggest day'}</div>
           <div class="v">${money(isNow ? dayTotals[daysSoFar - 1] : peak[1])}</div>${!isNow && peak[0] >= 0 ? `<div class="muted small">${dayLabel(days[peak[0]])}</div>` : ''}</div>
-        <div><div class="k"><i style="--c:#F97316">A</i>Daily average</div><div class="v">${money(total / daysSoFar)}</div></div>
-        <div><div class="k"><i style="--c:#64748B">B</i>Budget left</div><div class="v${neg(b.left)}">${money(b.left)}</div></div>
+        <div><div class="k">Daily average</div><div class="v">${money(total / daysSoFar)}</div></div>
+        <div><div class="k">Left to spend</div><div class="v${neg(b.left)}">${money(b.left)}</div></div>
       </div></section>`;
 
     // Where it went: spending by fund (fund colours are the validated palette).
@@ -852,7 +875,7 @@
     const maxC = cats.length ? byCat[cats[0]] : 1;
     const ranking = `<section class="card"><div class="card-head"><h2>Top categories</h2><span class="hint">tap to filter</span></div>
       ${cats.length ? cats.map(c => `<div class="rank" role="button" tabindex="0" data-act="cat" data-key="${esc(c)}" style="cursor:pointer${state.cat === c ? ';background:var(--accent-soft);border-radius:12px' : ''}">${tile(cIcon(c), cColour(c), 'round')}
-        <div class="name">${esc(c)} <small>${pctf(byCat[c] / total, 1)} · ${count[c]} bill${count[c] > 1 ? 's' : ''}</small></div><strong class="num">${money(byCat[c])}</strong>
+        <div class="name">${esc(c)} <small>${pctf(byCat[c] / total, 1)} · ${count[c]} expense${count[c] > 1 ? 's' : ''}</small></div><strong class="num">${money(byCat[c])}</strong>
         <div class="bar"><span style="--w:${(byCat[c] / maxC * 100).toFixed(1)}%"></span></div></div>`).join('') : empty('📊', 'Nothing to rank yet.')}</section>`;
 
     // Daily spending line.
@@ -875,7 +898,7 @@
     // Bills for the month (filtered by the chosen category).
     if (state.cat && cats.indexOf(state.cat) < 0) state.cat = '';
     const items = activity({ expenses: true, month: m, cat: state.cat });
-    const list = `<section class="card flush"><div class="card-head"><h2>${state.cat ? esc(cIcon(state.cat)) + ' ' + esc(state.cat) : 'All bills'}</h2>
+    const list = `<section class="card flush"><div class="card-head"><h2>${state.cat ? esc(cIcon(state.cat)) + ' ' + esc(state.cat) : 'All expenses'}</h2>
         ${state.cat ? '<button class="btn link" data-act="cat" data-key="">Show all ✕</button>' : addBtn('expenses', 'Add expense')}</div>
       ${items.length ? txRows(items, true) : empty('🧾', `No expenses in ${monthLong(m)}.`)}</section>`;
 
@@ -1004,7 +1027,7 @@
     const months = L[accts[0]] ? Object.keys(L[accts[0]].months).sort() : [];
 
     const hero = `<section class="hero">
-      <div class="label">${sel === 'All' ? 'Total in all bank accounts' : esc(pName(sel)) + '’s bank accounts'}</div>
+      <div class="label">${M.accounts.map(esc).join(', ')} · ${sel === 'All' ? 'both of you' : esc(pName(sel))}</div>
       <div class="big${neg(total)}">${money(total)}</div>
       <div class="myr">≈ ${myr(total * M.general.exchangeRate)} · since opening on ${fmtDate(M.general.startDate)}</div>
       <div class="hero-stats" style="grid-template-columns:repeat(${Math.min(3, accts.length)}, minmax(0, 1fr))">${accts.map(a =>
@@ -1013,7 +1036,7 @@
     const cards = accts.map(a => {
       const A = L[a];
       const split = sel === 'All' ? `<div class="row">${M.codes.map(c => `<span class="chip">${avatar(c)}${money(M.ledgers[c][a].balance)}</span>`).join('')}</div>` : '';
-      return `<section class="card" style="border-top:4px solid ${aColour(a)}">
+      return `<section class="card">
         <div class="card-head"><span class="row" style="flex-wrap:nowrap;min-width:0">${tile(aIcon(a), aColour(a))}<span class="stack" style="gap:0;min-width:0"><h2>${esc(a)}</h2>
           <span class="muted small">${fundsIn(a).map(f => esc(fIcon(f)) + ' ' + esc(f)).join(' · ')}</span></span></span></div>
         <div style="font-size:28px;font-weight:800;letter-spacing:-.02em" class="${neg(A.balance).trim()}">${money(A.balance)}</div>
@@ -1126,7 +1149,7 @@
     const closed = mine.filter(w => w.closed);
     const stats = [['🇦🇺 Australia', money(T.aud)], ['🇲🇾 Malaysia', myr(T.myr)]].concat(T.debts > 0.004 ? [['↘ Debts', money(T.debts)]] : []);
     const hero = `<section class="hero">
-      <div class="label">${esc(pName(M.viewer))}’s accounts + shared</div>
+      <div class="label">🔒 ${esc(pName(M.viewer))}’s own + shared accounts · Australia &amp; Malaysia</div>
       <div class="big${neg(T.net)}">${money(T.net)}</div>
       <div class="myr">≈ ${myr(T.netMYR)} at ${rateText(M.general.exchangeRate)}</div>
       <div class="hero-stats" style="grid-template-columns:repeat(${stats.length}, minmax(0, 1fr))">${stats.map(([k, v]) => `<div class="hero-stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('')}</div></section>`;
@@ -1156,7 +1179,8 @@
       <div class="cols">${WALLET_PLACES.map(section).join('')}</div>
       ${closed.length ? `<details class="more"><summary>Closed accounts (${closed.length})</summary><div class="wstack" style="margin-top:10px">${closed.map(w => walletCard(w)).join('')}</div></details>` : ''}
       ${transfers}
-      <p class="muted small" style="margin:0 2px">🔒 Only you can see this page. Your Everyday, Self Saving and Shared Saving balances come from Savings ▸ Accounts; any other account shows the balance you record. Transfer fees are saved as expenses.</p>`;
+      <p class="muted small" style="margin:0 2px">🔒 Only you can see this page. It adds up your own accounts and shared ones in both countries, so its total won’t match Savings ▸ Accounts, which counts only ${state.M.accounts.map(esc).join(', ')} for whoever is picked at the top.
+        Those three balances come from Savings ▸ Accounts; any other account shows the balance you record. Transfer fees are saved as expenses.</p>`;
   }
 
   function walletDetail(w) {
@@ -1309,7 +1333,7 @@
     const M = state.M;
     const S = M.split;
     const hero = S.amount < 0.005
-      ? `<section class="hero"><div class="label">Split bills</div><div class="big">🎉 All settled</div>
+      ? `<section class="hero"><div class="label">Settle up</div><div class="big">🎉 All settled</div>
           <div class="myr">Nobody owes anything right now.</div></section>`
       : `<section class="hero"><div class="label">To settle up</div>
           <div class="row" style="gap:10px;margin:8px 0 2px;flex-wrap:nowrap">${avatar(S.debtor, 'lg')}<span style="font-size:20px">→</span>${avatar(S.creditor, 'lg')}
@@ -1483,11 +1507,11 @@
     const go = (act, key) => `role="button" tabindex="0" data-act="${act}" data-key="${key}" style="cursor:pointer"`;
     const line = (a, v, cls) => `<div class="kv"><span>${a}</span><span class="num${cls || ''}">${v}</span></div>`;
 
-    const bills = `<section class="card" ${go('group', 'home')}><div class="card-head"><h2>${monthLong(m)} ${m.slice(0, 4)} bills</h2><span class="muted">›</span></div>
-      <div class="stats three-up">${stat('In', money(income))}${stat('Spent', money(spent))}${stat('Left', money(income - spent), '', neg(income - spent))}</div></section>`;
+    const bills = `<section class="card" ${go('group', 'home')}><div class="card-head"><h2>${monthLong(m)} ${m.slice(0, 4)}</h2><span class="muted">›</span></div>
+      <div class="stats three-up">${stat('In', money(income))}${stat('Spent', money(spent))}${stat(m === E.monthOf(M.today) ? 'Saved so far' : 'Saved', money(income - spent), '', neg(income - spent))}</div></section>`;
     const budget = `<section class="card" ${go('view', 'budget')}><div class="card-head"><h2>${monthLong(m)} everyday budget</h2><span class="muted">›</span></div>
       <div class="row" style="flex-wrap:nowrap;gap:18px"><div class="ring" style="--p:${leftPct}"><div><span class="k">Left</span><span class="v">${leftPct}%</span></div></div>
-        <div style="flex:1;min-width:0">${line('Budget left', `<strong>${money(b.left)}</strong>`, neg(b.left))}${line('This month’s budget', money(b.budget))}${line('Spent', money(b.spent))}</div></div></section>`;
+        <div style="flex:1;min-width:0">${line('Left to spend', `<strong>${money(b.left)}</strong>`, neg(b.left))}${line('This month’s budget', money(b.budget))}${line('Spent', money(b.spent))}</div></div></section>`;
     const assets = `<section class="card" ${go('view', 'accounts')}><div class="card-head"><h2>Accounts &amp; net worth</h2><span class="muted">›</span></div>
       <div class="stats">${stat('Net worth', money(worth), myr(worth * M.general.exchangeRate))}${M.accounts.map(a => stat(esc(aIcon(a)) + ' ' + esc(a), money(L[a].balance))).join('')}</div></section>`;
     const sup = `<section class="card" ${go('view', 'super')}><div class="card-head"><h2>🦘 Super</h2><span class="muted">›</span></div>
@@ -1735,7 +1759,7 @@
         <li><strong>Daily ${hour(sch.remindHour)}</strong>: pay still to move to Self Saving / Shared Saving, until you tap ✅ Done.</li>
         <li><strong>1st of the month, ${hour(sch.interestHour)}</strong>: record last month’s bank interest.</li>
         <li><strong>Bills &amp; subscriptions</strong>: before each one is due, at the time you chose in the bill. Tap to pay and record it.</li>
-        <li><strong>Split bills</strong>: as soon as the other person adds a bill they paid, on Tuesdays, and when they tap <strong>Remind</strong>.</li></ul>`;
+        <li><strong>Settle up</strong>: as soon as the other person adds a bill they paid, on Tuesdays, and when they tap <strong>Remind</strong>.</li></ul>`;
     const phones = status.phones.length ? `<h3 style="margin-top:12px">Phones with notifications</h3>${status.phones.map(ph => `<div class="spread" style="padding:6px 0;border-top:1px solid var(--line)">
         <span><strong>${esc(ph.name)}</strong>${ph.me ? ' <span class="tag good">this phone</span>' : ''}<div class="muted small">for ${esc(who(ph.person))}</div></span></div>`).join('')}` : '';
     const personSelect = sel => `<label class="field"><span>Notify this phone about</span><select id="push-person">${state.M.codes.map(c => `<option value="${esc(c)}"${sel === c ? ' selected' : ''}>${esc(pName(c))}</option>`).join('')}
@@ -2224,7 +2248,8 @@
 
   function newRecord(kind, keep) {
     const M = state.M;
-    const who = (keep && keep.person) || (state.person !== 'All' ? state.person : store.get('lastPerson') || M.codes[0]);
+    // Nothing chosen yet on this phone: the phone's owner, not simply the first person.
+    const who = (keep && keep.person) || (state.person !== 'All' ? state.person : store.get('lastPerson') || M.viewer || M.codes[0]);
     const code = M.codes.indexOf(who) >= 0 ? who : M.codes[0];
     const p = personOf(code) || {};
     const date = (keep && keep.date) || M.today;
@@ -2537,7 +2562,7 @@
           <label>1 AUD = <input id="calc-rate" type="number" inputmode="decimal" step="0.0001" min="0" value="${esc(c.rate)}" aria-label="MYR per AUD"> MYR</label></div>` : ''}
       </div>
       <div class="calc-keys">${keys.map(k => `<button type="button" data-act="calc" data-key="${k}"${'0123456789.'.indexOf(k) >= 0 ? '' : ' class="op"'} aria-label="${k === '⌫' ? 'Delete' : k}">${k}</button>`).join('')}
-        <button type="button" data-act="calc" data-key="C" class="op wide" aria-label="Clear">C</button><button type="button" data-act="calc" data-key="=" class="eq wide">=</button></div>
+        <button type="button" data-act="calc" data-key="C" class="op wide" aria-label="Clear">C</button><button type="button" data-act="calc" data-key="=" class="op wide" aria-label="Work it out">=</button></div>
     </div>`;
   }
 
@@ -2644,13 +2669,22 @@
       const picks = descriptionPicks(r.category);
       const typed = String(r.description || '').trim().toLowerCase();
       const fromW = formWallet(r.fund);
+      // Categories: the six used most, right under the amount; the rest behind "More".
+      const used = {};
+      M.expenses.forEach(x => { used[x.category] = (used[x.category] || 0) + 1; });
+      const ranked = M.categories.map((c, i) => [c, i]).sort((a, b) => (used[b[0].name] || 0) - (used[a[0].name] || 0) || a[1] - b[1]).map(x => x[0]);
+      let shownCats = F.allCats || ranked.length <= 7 ? ranked : ranked.slice(0, 6);
+      const selCat = ranked.find(c => c.name === r.category);
+      if (selCat && shownCats.indexOf(selCat) < 0) shownCats = shownCats.slice(0, 5).concat([selCat]); // the chosen one is always on show
+      const lastUsed = F.isNew && !F.catTouched && !F.bill && r.category === store.get('lastCategory');
       body = `
         ${keypad(true, fromW ? fromW.currency : '')}
+        <div class="field"><span>Category${lastUsed ? ' <span class="cat-note">· last used, tap to change</span>' : ''}</span><input type="hidden" name="category" value="${esc(r.category)}">
+          <div class="cat-grid">${shownCats.map(c => `<button type="button" class="cat-chip" data-act="form-cat" data-key="${esc(c.name)}" aria-pressed="${c.name === r.category}" style="--c:${fColour(c.fund)}" title="${esc(c.fund)}"><span class="e">${esc(cIcon(c.name))}</span>${esc(c.name)}</button>`).join('')}
+            ${shownCats.length < ranked.length ? `<button type="button" class="cat-chip more" data-act="cat-more" aria-label="Show all ${ranked.length} categories"><span class="e">⋯</span>More (${ranked.length - shownCats.length})</button>` : ''}</div></div>
         <div class="field"><span>Whose expense?</span>${who(r.person, people.concat([['Shared', 'Shared']]))}</div>
         ${paidByField(r, 'Who paid?', people)}
         ${r.person === 'Shared' ? splitField(r) : ''}
-        <div class="field"><span>Category</span><input type="hidden" name="category" value="${esc(r.category)}">
-          <div class="cat-grid">${M.categories.map(c => `<button type="button" class="cat-chip" data-act="form-cat" data-key="${esc(c.name)}" aria-pressed="${c.name === r.category}" style="--c:${fColour(c.fund)}" title="${esc(c.fund)}"><span class="e">${esc(cIcon(c.name))}</span>${esc(c.name)}</button>`).join('')}</div></div>
         <label class="field"><span>Comes out of</span>${fundSelect('fund', r.fund, `Category’s fund: ${fIcon(catFund)} ${catFund} (${(fundOf(catFund) || {}).account || ''})`).replace(/<\/select>$/, walletOptions(r.fund, true) + '</select>')}</label>
         <div class="two">${field('Date', 'date', r.date, 'type="date" required')}
           ${field('Description', 'description', r.description, 'type="text" placeholder="Optional" list="desc-list" autocomplete="off"')}</div>
@@ -2882,8 +2916,21 @@
         if (owed > 0.004) split += line(`⚖️ ${esc(pName(other))} owes ${esc(pName(r.paidBy))}`, `<strong>${money(owed)}</strong>`);
       }
       const fromW = formWallet(r.fund);
+      // What this does to the everyday budget (Home's "Left to spend"), for whoever's budget it comes out of.
+      let budgetLine = '';
+      const ym = /^\d{4}-\d{2}-\d{2}$/.test(r.date || '') ? E.monthOf(r.date) : '';
+      if (!fromW && fund && ym && amt > 0) {
+        const k = r.person === 'Shared' || M.codes.indexOf(r.person) < 0 ? 'All' : r.person;
+        const bb = E.monthSummary(M, k, ym).budget;
+        if (bb.funds.indexOf(fund) >= 0 && (bb.budget > 0.004 || bb.spent > 0.004)) {
+          const was = F.isNew ? null : M.expenses.find(x => x.id === r.id);
+          const counted = was && was.month === ym && bb.funds.indexOf(was.fund) >= 0 ? (k === 'All' ? was.amount : was.shares[k] || 0) : 0;
+          const after = bb.left + counted - amt;
+          budgetLine = line(`Left to spend after this <span class="muted small">(${k === 'All' ? 'both' : esc(pName(k))}, ${MONTHS[+ym.slice(5, 7) - 1]})</span>`, `<strong>${money(after)}</strong>`, after < -0.004 ? ' neg' : '');
+        }
+      }
       el.innerHTML = myrLine() + (fromW ? line('Comes out of', `${esc(formWalletLabel(fromW))} <span class="muted small">Wallet</span>`)
-        : fund ? line('Comes out of', `${esc(fIcon(fund))} ${esc(fund)}`) + (fundOf(fund) ? line('Bank account', esc(fundOf(fund).account)) : '') : line('Category', '—')) + split +
+        : fund ? line('Comes out of', `${esc(fIcon(fund))} ${esc(fund)}`) + (fundOf(fund) ? line('Bank account', esc(fundOf(fund).account)) : '') : line('Category', '—')) + budgetLine + split +
         (fromW ? '<span class="muted small">It comes off that account’s balance on the Wallet page and counts as spending in its category. No fund pays it, as the money isn’t from your Australian accounts.</span>' : '');
     } else if (F.kind === 'paybacks') {
       const amt = Number(r.amount) || 0;
@@ -3700,9 +3747,11 @@
     } else if (act === 'wt-feein') { readForm(); state.form.rec.feeIn = key; renderForm(); }
     else if (act === 'wallet') {
       const order = ['All'].concat(state.M.codes);
-      state.person = order[(order.indexOf(state.person) + Number(key) + order.length) % order.length];
-      store.set('person', state.person);
-      renderKeepingPlace();
+      if (order.indexOf(key) >= 0 && key !== state.person) {
+        state.person = key;
+        store.set('person', state.person);
+        renderKeepingPlace();
+      }
     } else if (act === 'month') {
       const M = state.M;
       const months = M.months.indexOf(state.month) < 0 ? M.months.concat(state.month).sort() : M.months;
@@ -3888,7 +3937,8 @@
       if ((F.kind === 'expenses' || F.kind === 'bills') && key !== 'Shared' && (!F.rec.paidBy || F.rec.paidBy === F.rec.person)) F.rec.paidBy = key; // usually you pay your own
       F.rec.person = key;
       renderForm();
-    } else if (act === 'form-cat') { readForm(); state.form.rec.category = key; if (!/^w:/.test(state.form.rec.fund || '')) state.form.rec.fund = ''; renderForm(); } // a Wallet account stays chosen
+    } else if (act === 'cat-more') { readForm(); state.form.allCats = true; renderForm(); }
+    else if (act === 'form-cat') { readForm(); state.form.catTouched = true; state.form.rec.category = key; if (!/^w:/.test(state.form.rec.fund || '')) state.form.rec.fund = ''; renderForm(); } // a Wallet account stays chosen
     else if (act === 'form-step') {
       const input = $('#entry-form [name="' + key + '"]');
       const next = Math.max(key === 'extraHours' ? -1e9 : 0, (Number(input.value) || 0) + Number(el.dataset.step));
@@ -3912,7 +3962,7 @@
       const r = state.form.rec;
       r.description = key;
       const cat = el.dataset.cat;
-      if (cat && cat !== r.category && state.M.categories.some(c => c.name === cat)) { r.category = cat; if (!/^w:/.test(r.fund || '')) r.fund = ''; } // the category it's usually in (a Wallet account stays chosen)
+      if (cat && cat !== r.category && state.M.categories.some(c => c.name === cat)) { r.category = cat; state.form.catTouched = true; if (!/^w:/.test(r.fund || '')) r.fund = ''; } // the category it's usually in (a Wallet account stays chosen)
       renderForm();
     }
     else if (act === 'form-from') { readForm(); state.form.rec.from = key; state.form.rec.to = state.M.codes.find(c => c !== key) || key; renderForm(); }
@@ -4089,7 +4139,7 @@
     if (e.target.id === 'search') {
       state.q = e.target.value;
       $('#bills').innerHTML = billsHtml();
-      $('#bills-title').textContent = state.q ? 'Search results' : monthLong(state.month) + ' bills';
+      $('#bills-title').textContent = state.q ? 'Search results' : monthLong(state.month) + ' activity';
     }
     if (e.target.id === 'fx-aud' || e.target.id === 'fx-myr') {
       const rate = state.M.general.exchangeRate || 0;
