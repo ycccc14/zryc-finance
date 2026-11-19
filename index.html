@@ -516,6 +516,12 @@
   .acct-mini .v { font-size: clamp(14px, 4vw, 18px); font-weight: 800; letter-spacing: -.01em; white-space: nowrap; }
   .list-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 4px 2px -6px; }
   .list-head h2 { display: flex; align-items: center; gap: 6px; }
+  /* Home "September activity" + All/ZR/YC/Shared stay on one row: the title gives way first. */
+  .act-head { flex-wrap: nowrap; gap: 8px; }
+  .act-head h2 { min-width: 0; font-size: clamp(14px, 4vw, 17px); white-space: nowrap; gap: 4px; }
+  .act-head h2 > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .act-head .mini-tabs { flex: none; }
+  .act-head .mini-tabs button { padding: 6px 7px; }
   .mini-tabs { display: inline-flex; background: var(--soft); border-radius: 10px; padding: 3px; gap: 2px; border: 1px solid var(--line); }
   .mini-tabs button { border: 0; background: none; padding: 5px 10px; border-radius: 8px; font-weight: 700; font-size: 13px; color: var(--muted); cursor: pointer; }
   .mini-tabs button[aria-pressed=true] { background: var(--card); color: var(--ink); box-shadow: 0 1px 3px rgba(60, 50, 10, .12); }
@@ -756,8 +762,8 @@
   <div id="lock" class="lock" hidden></div>
   <div id="pair" hidden></div>
   <script src="vendor/chart.umd.js"></script>
-  <script src="engine.js?v=bf063429a4"></script>
-  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = 'bf063429a4';</script>
-  <script src="boot.js?v=bf063429a4"></script>
+  <script src="engine.js?v=a510cd404a"></script>
+  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = 'a510cd404a';</script>
+  <script src="boot.js?v=a510cd404a"></script>
 </body>
 </html>

@@ -571,7 +571,7 @@
         <div class="k"><span class="dot" style="--c:${aColour(a)}"></span>${esc(a)}</div><div class="v${neg(L[a].balance)}">${money(L[a].balance)}</div></div>`).join('')}</div>`;
 
     const tabs = [['All', 'All']].concat(M.codes.map(c => [c, pName(c)]), [['Shared', 'Shared']]);
-    const bills = `<div class="list-head"><h2>💛 <span id="bills-title">${state.q ? 'Search results' : monthLong(m) + ' activity'}</span></h2>
+    const bills = `<div class="list-head act-head"><h2>💛 <span id="bills-title">${state.q ? 'Search results' : monthLong(m) + ' activity'}</span></h2>
       <div class="mini-tabs" role="group" aria-label="Whose activity">${tabs.map(([k, l]) => `<button type="button" data-act="bill-tab" data-key="${esc(k)}" aria-pressed="${state.billTab === k}">${esc(l)}</button>`).join('')}</div></div>
       <div id="bills" style="display:grid;gap:12px">${billsHtml()}</div>`;
 
