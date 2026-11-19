@@ -24,7 +24,7 @@
   // Icons used when a fund or category has none set in Settings.
   const ICON_FALLBACK = {
     'Living Expenses': '🏠', 'Savings': '🐷', 'Tuition Fund': '🎓', 'Family': '👨‍👩‍👧', 'GPGZ': '✨', 'Shopping/Travel': '✈️', 'Emergency Fund': '🛟',
-    'Food/Snack': '🍜', 'Grocery': '🛒', 'Daily Essentials': '🧴', 'Transport': '🚌', 'Phone': '📱', 'Study': '📚', 'Other': '📦',
+    'Food/Snack': '🍜', 'Grocery': '🛒', 'Daily Essentials': '🧴', 'Transport': '🚌', 'Phone': '📱', 'Study': '📚', 'Medical': '💊', 'Other': '📦',
     'Shopping': '🛍️', 'Tuition Fee': '🎓', 'Emergency': '🩺',
   };
   // Colour-blind-safe fund colours, in fund order (see README).
