@@ -567,6 +567,38 @@
   .table-wrap { max-height: min(70vh, 620px); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
   .table-wrap::-webkit-scrollbar { width: 8px; height: 8px; }
   .table-wrap::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
+  /* Phones: wide tables become a list. Each row shows its name and main figure; tap to open the rest. Laptops keep the table. */
+  .plist { display: none; }
+  @media (max-width: 699px) {
+    .table-wrap.has-plist { display: none; }
+    .plist { display: block; margin-top: 4px; }
+  }
+  .pl-head { display: flex; justify-content: space-between; gap: 12px; padding: 0 0 6px; border-bottom: 1px solid var(--line);
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .pl-head .chip, .pl-g-inline .chip { text-transform: none; letter-spacing: 0; padding: 0; background: none; border: 0; font-size: 11px; gap: 4px; }
+  .pl-row { border-bottom: 1px solid var(--line); }
+  .pl-row > summary, .pl-row.flat { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 8px 0; list-style: none; cursor: pointer; }
+  .pl-row.flat { cursor: default; padding-right: 18px; }
+  .pl-row > summary::-webkit-details-marker { display: none; }
+  .pl-row > summary::after { content: ''; flex: none; width: 7px; height: 7px; margin: 0 3px 3px 0; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+    transform: rotate(45deg); transition: transform .2s cubic-bezier(.2, .8, .2, 1); }
+  .pl-row[open] > summary::after { transform: rotate(-135deg); margin: 3px 3px 0 0; }
+  .pl-t { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-weight: 650; }
+  .pl-t .chip { padding: 0; background: none; border: 0; }
+  .pl-v { flex: none; max-width: 55%; text-align: right; font-weight: 750; font-variant-numeric: tabular-nums; }
+  .pl-v .num, .pl-kv .num { white-space: nowrap; }
+  .pl-row.total > summary, .pl-row.total.flat { font-weight: 800; }
+  .pl-row.total .pl-t, .pl-row.total .pl-v { font-weight: 800; }
+  .pl-body { display: grid; gap: 1px; margin: 0 0 12px; padding: 8px 12px; background: var(--soft); border-radius: 12px; animation: pl-in .2s cubic-bezier(.2, .8, .2, 1); }
+  @keyframes pl-in { from { opacity: 0; transform: translateY(-3px); } }
+  @media (prefers-reduced-motion: reduce) { .pl-body { animation: none; } .pl-row > summary::after { transition: none; } }
+  .pl-kv { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 4px 0; font-size: 14px; }
+  .pl-kv > span:first-child { color: var(--ink-2); min-width: 0; }
+  .pl-kv > .num { display: grid; justify-items: end; gap: 4px; }
+  .pl-kv .bar { width: 96px; min-width: 0 !important; height: 6px; }
+  .pl-g { margin: 8px 0 2px; font-size: 13px; font-weight: 700; }
+  .pl-g:first-child { margin-top: 0; }
+  .pl-body > .btn.link { justify-self: start; margin-top: 4px; }
   thead tr:last-child th { position: sticky; top: 0; z-index: 2; box-shadow: 0 1px 0 var(--line); }
   thead tr:last-child th.sticky { z-index: 3; }
   tfoot td { position: sticky; bottom: 0; background: var(--card); z-index: 2; box-shadow: 0 -1px 0 var(--line); }
@@ -724,8 +756,8 @@
   <div id="lock" class="lock" hidden></div>
   <div id="pair" hidden></div>
   <script src="vendor/chart.umd.js"></script>
-  <script src="engine.js?v=0f9d45feed"></script>
-  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = '0f9d45feed';</script>
-  <script src="boot.js?v=0f9d45feed"></script>
+  <script src="engine.js?v=bf063429a4"></script>
+  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = 'bf063429a4';</script>
+  <script src="boot.js?v=bf063429a4"></script>
 </body>
 </html>

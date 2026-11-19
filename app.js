@@ -369,8 +369,71 @@
   }
 
   const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  const table = (head, body, foot) =>
-    `<div class="table-wrap"><table><thead>${head}</thead><tbody>${body}</tbody>${foot ? `<tfoot>${foot}</tfoot>` : ''}</table></div>`;
+  /**
+   * A table on laptops; on phones, wide tables (5+ columns) also get a list: each row shows its name and one main figure,
+   * and opens to the rest (blank and zero cells left out). `opts`: key (column shown on the row, default the last),
+   * pivot (one row per column instead, e.g. per fund; key row = the row with class "balance"), action (label for rows you can tap),
+   * phone: false (table only).
+   */
+  function table(head, body, foot, opts) {
+    const html = `<table><thead>${head}</thead><tbody>${body}</tbody>${foot ? `<tfoot>${foot}</tfoot>` : ''}</table>`;
+    const list = opts && opts.phone === false ? '' : phoneList(html, opts || {});
+    return `<div class="table-wrap${list ? ' has-plist' : ''}">${html}</div>${list}`;
+  }
+
+  function phoneList(html, opts) {
+    const t = document.createElement('template');
+    t.innerHTML = html;
+    const tbl = t.content.querySelector('table');
+    const headRows = Array.from(tbl.tHead.rows);
+    const heads = headRows.length ? Array.from(headRows[headRows.length - 1].cells) : [];
+    const n = heads.length;
+    if (n <= 4) return ''; // narrow tables already fit a phone
+    const groups = new Array(n).fill('');
+    if (headRows.length > 1) {
+      let i = 0;
+      Array.from(headRows[0].cells).forEach(c => { for (let j = 0; j < (c.colSpan || 1); j++) groups[i + j] = c.innerHTML.trim(); i += c.colSpan || 1; });
+    }
+    const labels = heads.map(h => h.innerHTML.trim());
+    const rows = Array.from(tbl.tBodies[0].rows).concat(tbl.tFoot ? Array.from(tbl.tFoot.rows) : []);
+    const blankCell = c => !c || /^[\s–—-]*$|^\$0\.00$|^RM 0\.00$/.test(c.textContent.trim());
+    const val = c => `<span class="num ${esc(c.className.replace(/\bsticky\b|\bnum\b/g, '').trim())}">${c.innerHTML.trim()}</span>`;
+    const kv = (label, c) => `<div class="pl-kv"><span>${label}</span>${val(c)}</div>`;
+    const item = (title, value, inner, cls, action) => (inner || action
+      ? `<details class="pl-row${cls}"><summary><span class="pl-t">${title}</span><span class="pl-v">${value}</span></summary><div class="pl-body">${inner}${action}</div></details>`
+      : `<div class="pl-row flat${cls}"><span class="pl-t">${title}</span><span class="pl-v">${value}</span></div>`);
+
+    if (opts.pivot) {
+      // Rows are line items, columns are the things (funds): one entry per column.
+      const keyRow = rows.find(r => r.classList.contains('balance')) || rows[rows.length - 1];
+      const ki = rows.indexOf(keyRow);
+      const items = labels.map((label, j) => {
+        if (j === 0) return '';
+        const inner = rows.map((r, i) => (i === ki || blankCell(r.cells[j]) ? '' : kv(r.cells[0].innerHTML.trim(), r.cells[j]))).join('');
+        return item(label, val(keyRow.cells[j]), inner, j === n - 1 ? ' total' : '', '');
+      }).join('');
+      return `<div class="plist"><div class="pl-head"><span></span><span>${keyRow.cells[0].innerHTML.trim()}</span></div>${items}</div>`;
+    }
+
+    const lead = [];
+    for (let i = 0; i < n && (i === 0 || !heads[i].classList.contains('num')); i++) lead.push(i);
+    const key = opts.key !== undefined && lead.indexOf(opts.key) < 0 ? opts.key : n - 1;
+    const keyLabel = (groups[key] ? `<span class="pl-g-inline">${groups[key]}</span> ` : '') + labels[key];
+    const items = rows.map(r => {
+      const cells = Array.from(r.cells);
+      if (cells.length !== n) return item(cells.map(c => c.innerHTML.trim()).join(' · '), '', '', '', ''); // e.g. one wide note cell
+      let inner = '';
+      let group = null;
+      cells.forEach((c, i) => {
+        if (lead.indexOf(i) >= 0 || i === key || blankCell(c)) return;
+        if (groups[i] !== group) { group = groups[i]; if (group) inner += `<div class="pl-g">${group}</div>`; }
+        inner += kv(labels[i], c);
+      });
+      const action = r.dataset.act ? `<button type="button" class="btn link" data-act="${esc(r.dataset.act)}" data-key="${esc(r.dataset.key || '')}">${esc(opts.action || r.title || 'Open')} ›</button>` : '';
+      return item(lead.map(i => cells[i].innerHTML.trim()).filter(Boolean).join(' · '), val(cells[key]), inner, r.classList.contains('total') ? ' total' : '', action);
+    }).join('');
+    return `<div class="plist"><div class="pl-head"><span>${lead.map(i => labels[i]).filter(Boolean).join(' · ')}</span><span>${keyLabel}</span></div>${items}</div>`;
+  }
   const empty = (emoji, text, action) => `<div class="empty"><span class="e">${emoji}</span>${text}${action ? `<div style="margin-top:12px">${action}</div>` : ''}</div>`;
   const stat = (k, v, s, cls) => `<div class="stat"><div class="k">${k}</div><div class="v${cls || ''}">${v}</div>${s ? `<div class="s">${s}</div>` : ''}</div>`;
   const addBtn = (kind, label) => `<button class="btn primary" data-act="add" data-key="${kind}">${ico('plus', 18)}${label}</button>`;
@@ -966,9 +1029,9 @@
     return `<div class="section-title"><h1>Budget</h1></div>
       <div class="cols">${allocCard}${acctCard}</div>
       <section class="card"><div class="card-head"><h2>Weekly split · ${who}</h2><span class="hint">${monthLong(m)}</span></div>
-        ${weeks.length ? table(fundHead('Week of'), weekBody, `<tr class="total"><td class="sticky">Month</td>${fundCells(agg(weekRows))}</tr>`) : empty('🗓️', 'No pay this month.')}</section>
+        ${weeks.length ? table(fundHead('Week of'), weekBody, `<tr class="total"><td class="sticky">Month</td>${fundCells(agg(weekRows))}</tr>`, { key: 1 }) : empty('🗓️', 'No pay this month.')}</section>
       <section class="card"><div class="card-head"><h2>Monthly split · ${who}</h2>${fySelect(fy, 'fy')}</div>
-        ${months.length ? table(fundHead('Month'), monthBody, fyT ? `<tr class="total"><td class="sticky">${fyName(fy)}</td>${fundCells(fyT)}</tr>` : '') : empty('🗓️', `No pay in ${fyName(fy)}.`)}</section>`;
+        ${months.length ? table(fundHead('Month'), monthBody, fyT ? `<tr class="total"><td class="sticky">${fyName(fy)}</td>${fundCells(fyT)}</tr>` : '', { key: 1 }) : empty('🗓️', `No pay in ${fyName(fy)}.`)}</section>`;
   }
 
   // ======================================================================
@@ -996,7 +1059,7 @@
       <div class="card-head"><span class="row">${avatar(k, 'lg')}<h2>${k === 'All' ? 'Both' : esc(pName(k))}</h2></span>
         <div style="text-align:right"><strong class="${neg(B.total.balance).trim()}" style="font-size:18px">${money(B.total.balance)}</strong><div class="muted small">${myr(B.total.balanceMYR)}</div></div></div>
       <div class="row" style="margin-bottom:8px">${accounts}</div>
-      <details class="more" open><summary>Monthly breakdown of fund balances</summary>${table(head, body)}</details></section>`;
+      <details class="more" open><summary>Monthly breakdown of fund balances</summary>${table(head, body, '', { pivot: true })}</details></section>`;
   }
 
   function viewBalances() {
@@ -1307,11 +1370,11 @@
       <div class="section-title"><h1>Tax &amp; super</h1></div>
       ${yearChips}
       <section class="card"><div class="card-head"><h2>By financial year</h2><span class="hint">1 July – 30 June</span></div>
-        ${years.length ? table('<tr><th class="sticky">Year</th><th>Person</th><th class="num">Gross</th><th class="num">Tax withheld</th><th class="num">Net</th><th class="num">Super</th><th class="num">Est. tax</th><th class="num">Refund / owing</th></tr>', yearRows) : empty('🧾', 'No pay yet.')}
+        ${years.length ? table('<tr><th class="sticky">Year</th><th>Person</th><th class="num">Gross</th><th class="num">Tax withheld</th><th class="num">Net</th><th class="num">Super</th><th class="num">Est. tax</th><th class="num">Refund / owing</th></tr>', yearRows, '', { action: 'Show this year' }) : empty('🧾', 'No pay yet.')}
         <p class="muted small">Tap a year to see its details below.</p></section>
       <div class="section-title"><h2>${fyName(fy)} in detail</h2></div>
       <div class="cols">${cards}</div>
-      <section class="card"><div class="card-head"><h2>Monthly summary</h2><span class="hint">${fyName(fy)}</span></div>${months.length ? table(head, body, foot) : empty('🗓️', `No pay in ${fyName(fy)}.`)}</section>
+      <section class="card"><div class="card-head"><h2>Monthly summary</h2><span class="hint">${fyName(fy)}</span></div>${months.length ? table(head, body, foot, { key: 3 }) : empty('🗓️', `No pay in ${fyName(fy)}.`)}</section>
       <section class="card flush"><div class="card-head"><h2>Payslip differences</h2></div>${diffs.length ? txRows(diffs) : empty('✅', 'Payslip tax matches the calculation (or no payslip tax entered).')}</section>
       <p class="muted small">The estimate uses this app’s pay entries only, with no deductions or other income, and the rates in Settings → Tax tables. It’s a guide, not tax advice. In your first year as a resident the tax-free threshold may be pro-rated.</p>`;
   }
@@ -2214,7 +2277,7 @@
       }
       preview = `<h3 style="margin-top:12px">Preview (first ${recs.length} of ${I.rows.length} rows)</h3>` + table(
         `<tr>${fields.map(f => `<th>${esc(f)}</th>`).join('')}${extra}</tr>`,
-        recs.map(r => `<tr>${fields.map(f => `<td>${esc(r[f])}</td>`).join('')}${r._calc ? `<td class="num">${money(r._calc.gross)}</td><td class="num">${money(r._calc.tax)}</td><td class="num">${money(r._calc.net)}</td>` : I.kind === 'income' ? '<td colspan="3" class="flag">check date / person</td>' : ''}</tr>`).join(''));
+        recs.map(r => `<tr>${fields.map(f => `<td>${esc(r[f])}</td>`).join('')}${r._calc ? `<td class="num">${money(r._calc.gross)}</td><td class="num">${money(r._calc.tax)}</td><td class="num">${money(r._calc.net)}</td>` : I.kind === 'income' ? '<td colspan="3" class="flag">check date / person</td>' : ''}</tr>`).join(''), '', { phone: false });
     }
     el.innerHTML = `
       <div class="card-head"><h2>📥 Import from CSV</h2></div>
