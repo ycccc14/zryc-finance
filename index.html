@@ -364,6 +364,8 @@
   .cat-chip { border: 1px solid var(--line); background: var(--card); border-radius: 14px; padding: 10px 4px 8px; display: grid; justify-items: center; gap: 4px;
     cursor: pointer; font-size: 12px; font-weight: 650; color: var(--ink-2); text-align: center; line-height: 1.2; }
   .cat-chip .e { font-size: 22px; line-height: 1; }
+  .cat-chip { min-width: 0; }
+  .cat-name { max-width: 100%; overflow-wrap: anywhere; } /* long names (Shopping/Travel) wrap after the slash, never spill out */
   .cat-chip.more { border-style: dashed; color: var(--muted); }
   .cat-note { font-weight: 600; color: var(--accent); }
   .cat-chip[aria-pressed=true] { border-color: var(--c, var(--accent)); background: color-mix(in srgb, var(--c, var(--accent)) 14%, var(--card)); color: var(--ink); }
@@ -762,8 +764,8 @@
   <div id="lock" class="lock" hidden></div>
   <div id="pair" hidden></div>
   <script src="vendor/chart.umd.js"></script>
-  <script src="engine.js?v=4f2ddae1df"></script>
-  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = '4f2ddae1df';</script>
-  <script src="boot.js?v=4f2ddae1df"></script>
+  <script src="engine.js?v=149247e205"></script>
+  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = '149247e205';</script>
+  <script src="boot.js?v=149247e205"></script>
 </body>
 </html>
