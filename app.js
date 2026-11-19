@@ -376,7 +376,7 @@
       M.income.filter(r => sel === 'All' || r.person === sel).forEach(r => items.push({
         date: r.date, kind: 'income', id: r.id, icon: tile('💼', pColour(r.person)),
         title: `${esc(pName(r.person))} · ${!r.hours && r.otherNet ? esc(r.note || 'other income') : 'pay'}`,
-        sub: `${hrs(r.hours)} @ ${money(r.rate)} · gross ${money(r.gross)} · tax ${money(r.tax)}`,
+        sub: r.wallet ? 'into ' + esc(walletLabel(r.wallet)) + walletAmt(r.wallet) : `${hrs(r.hours)} @ ${money(r.rate)} · gross ${money(r.gross)} · tax ${money(r.tax)}`,
         amt: `<span class="pos">${signed(r.net)}</span>`,
         small: r.actualTax !== null && Math.abs(r.taxDiff) > 0.004 ? '<span class="flag">payslip differs</span>' : 'net',
         value: r.net,
@@ -416,7 +416,7 @@
         const share = sel === 'All' ? r.amount : r.shares[sel];
         items.push({
           date: r.date, kind: 'interest', id: r.id, icon: tile('🏦', aColour(r.account), 'round'),
-          title: 'Interest · ' + esc(r.account), sub: (r.person === 'Shared' ? 'Shared' : esc(pName(r.person))) + ' · into ' + esc(r.fund) + (r.note ? ' · ' + esc(r.note) : ''),
+          title: 'Interest · ' + esc(interestAcct(r)), sub: (r.person === 'Shared' ? 'Shared' : esc(pName(r.person))) + (r.wallet ? walletAmt(r.wallet) : ' · into ' + esc(r.fund)) + (r.note ? ' · ' + esc(r.note) : ''),
           amt: `<span class="pos">+${money(share)}</span>`, small: sel !== 'All' && r.person === 'Shared' ? 'your share' : '', value: share,
         });
       });
@@ -647,7 +647,7 @@
     if (tab !== 'Shared') {
       M.income.filter(r => (tab === 'All' || r.person === tab) && (q || r.month === state.month)).forEach(r => items.push({
         date: r.date, kind: 'income', id: r.id, icon: tile('💼', pColour(r.person), 'round'),
-        title: !r.hours && r.otherNet ? esc(r.note || 'Other income') : 'Pay · ' + hrs(r.hours), sub: `${esc(pName(r.person))} · income${r.note && r.hours ? ' · ' + esc(r.note) : ''}`,
+        title: !r.hours && r.otherNet ? esc(r.note || 'Other income') : 'Pay · ' + hrs(r.hours), sub: `${esc(pName(r.person))} · income${r.note && r.hours ? ' · ' + esc(r.note) : ''}${r.wallet ? ' · into ' + esc(walletLabel(r.wallet)) + walletAmt(r.wallet) : ''}`,
         text: [pName(r.person), 'pay income', r.note, r.net.toFixed(2)].join(' '),
         amt: `<span class="pos">+${money(r.net)}</span>`, small: 'tax ' + money(r.tax), inc: r.net, out: 0,
       }));
@@ -661,8 +661,8 @@
     }));
     M.interest.filter(r => (tab === 'All' || r.person === tab) && (q || r.month === state.month)).forEach(r => items.push({
       date: r.date, kind: 'interest', id: r.id, icon: tile('🏦', aColour(r.account), 'round'),
-      title: 'Interest · ' + esc(r.account), sub: (r.person === 'Shared' ? 'Shared' : esc(pName(r.person))) + ' · into ' + esc(r.fund),
-      text: ['interest', r.account, r.fund, r.note, pName(r.person), r.amount.toFixed(2)].join(' '),
+      title: 'Interest · ' + esc(interestAcct(r)), sub: (r.person === 'Shared' ? 'Shared' : esc(pName(r.person))) + (r.wallet ? walletAmt(r.wallet) : ' · into ' + esc(r.fund)),
+      text: ['interest', interestAcct(r), r.fund, r.note, pName(r.person), r.amount.toFixed(2)].join(' '),
       amt: `<span class="pos">+${money(r.amount)}</span>`, small: '', inc: r.amount, out: 0,
     }));
     const shown = (q ? items.filter(it => it.text.toLowerCase().indexOf(q) >= 0) : items)
@@ -1201,6 +1201,7 @@
       <div class="wsolo">${walletCard(w, true)}</div>
       ${w.closed ? '<div class="notice">This account is closed, so it isn’t counted in your totals.</div>' : ''}
       <div class="two wactions"><button class="btn" data-act="wallet-transfer" data-key="${esc(w.id)}">🔁 Transfer</button><button class="btn" data-act="wallet-update" data-key="${esc(w.id)}">⚖️ ${w.linked ? 'Fix balance' : 'Update balance'}</button></div>
+      ${!w.linked && !w.debt && !w.closed ? `<div class="two wactions"><button class="btn" data-act="wallet-income" data-key="${esc(w.id)}">💰 Add income</button><button class="btn" data-act="wallet-interest" data-key="${esc(w.id)}">🏦 Add interest</button></div>` : ''}
       <div style="text-align:center">${monthNav()}</div>
       <div class="stats">${stat('Money in', wMoney(W.in, cur))}${stat('Money out', wMoney(W.out, cur))}</div>
       <section class="card"><div class="card-head"><h2>${w.debt ? 'Owed' : 'Balance'} in ${MONTHS[+m.slice(5, 7) - 1]}</h2></div>
@@ -1358,16 +1359,16 @@
     years = years.sort().reverse();
     const fyTotal = sumOf(inFy, share);
     const allTotal = sumOf(mine, share);
-    const accts = interestAccounts();
+    const accts = interestAccounts().concat(inFy.filter(r => r.wallet).map(interestAcct).filter((a, i, all) => all.indexOf(a) === i));
     const months = E.fyMonths(fy).filter(m => m <= E.monthOf(M.today) || inFy.some(r => r.month === m));
-    const cell = (m, a) => sumOf(inFy.filter(r => r.month === m && r.account === a), share);
+    const cell = (m, a) => sumOf(inFy.filter(r => r.month === m && interestAcct(r) === a), share);
 
     const hero = `<section class="hero">
       <div class="label">${sel === 'All' ? 'Bank interest we earned' : esc(pName(sel)) + '’s bank interest'} · ${fyName(fy)}</div>
       <div class="big">${money(fyTotal)}</div>
       <div class="myr">≈ ${myr(fyTotal * M.general.exchangeRate)} · all time ${money(allTotal)}</div>
       <div class="hero-stats" style="grid-template-columns:repeat(${Math.min(3, accts.length)}, minmax(0, 1fr))">${accts.map(a =>
-        `<div class="hero-stat"><div class="k">${esc(aIcon(a))} ${esc(a)}</div><div class="v">${money(sumOf(inFy.filter(r => r.account === a), share))}</div></div>`).join('')}</div></section>`;
+        `<div class="hero-stat"><div class="k">${esc(aIcon(a))} ${esc(a)}</div><div class="v">${money(sumOf(inFy.filter(r => interestAcct(r) === a), share))}</div></div>`).join('')}</div></section>`;
     const chips = `<div class="spread"><div class="scroller" style="margin:0;padding:2px 0">${years.map(y =>
       `<button class="filter-chip" data-act="fy" data-key="${y}" aria-pressed="${y === fy}" style="padding-left:12px">${fyName(y)}</button>`).join('')}</div>${addBtn('interest', 'Record')}</div>`;
 
@@ -1384,7 +1385,7 @@
     const head = `<tr><th class="sticky">Month</th>${accts.map(a => `<th class="num">${esc(aIcon(a))} ${esc(a)}</th>`).join('')}<th class="num">Total</th></tr>`;
     const body = months.map(m => `<tr><td class="sticky">${fmtMonth(m)}</td>${accts.map(a => `<td class="num">${dash(cell(m, a))}</td>`).join('')}
       <td class="num"><strong>${dash(sumOf(accts, a => cell(m, a)))}</strong></td></tr>`).join('');
-    const foot = `<tr class="total"><td class="sticky">${fyName(fy)}</td>${accts.map(a => `<td class="num">${money(sumOf(inFy.filter(r => r.account === a), share))}</td>`).join('')}<td class="num">${money(fyTotal)}</td></tr>`;
+    const foot = `<tr class="total"><td class="sticky">${fyName(fy)}</td>${accts.map(a => `<td class="num">${money(sumOf(inFy.filter(r => interestAcct(r) === a), share))}</td>`).join('')}<td class="num">${money(fyTotal)}</td></tr>`;
     const monthly = `<section class="card"><div class="card-head"><h2>Monthly</h2><span class="hint">${fyName(fy)}</span></div>
       ${inFy.length ? `<div class="chart-box"><canvas id="ch-interest" role="img" aria-label="Bank interest per month by account"></canvas></div>` : ''}
       ${table(head, body, foot)}</section>`;
@@ -1392,7 +1393,7 @@
     const list = activity({ interest: true }).filter(it => (M.interest.find(r => r.id === it.id) || {}).fy === fy);
     return hero + chips + monthly + `<section class="card flush"><div class="card-head"><h2>Entries</h2><span class="hint">Tap to edit</span></div>
       ${list.length ? txRows(list) : empty('🏦', `No interest recorded for ${fyName(fy)} yet.`, addBtn('interest', 'Record interest'))}</section>
-      <p class="muted small">Interest isn’t split by the budget %: all of it goes into one fund, ${esc(E.interestFundIn('Self Saving', M.funds) || 'Savings')} for Self Saving and ${esc(E.interestFundIn('Shared Saving', M.funds) || 'Tuition Fund')} for Shared Saving (so it shows in the account balance) and counts as taxable income in the year-end tax estimate. Interest on the joint Shared Saving account is split ${pctf(M.general.sharedSplit)} / ${pctf(1 - M.general.sharedSplit)} unless you pick one person.</p>`;
+      <p class="muted small">Interest isn’t split by the budget %: all of it goes into one fund, ${esc(E.interestFundIn('Self Saving', M.funds) || 'Savings')} for Self Saving and ${esc(E.interestFundIn('Shared Saving', M.funds) || 'Tuition Fund')} for Shared Saving (so it shows in the account balance) and counts as taxable income in the year-end tax estimate. Interest on the joint Shared Saving account is split ${pctf(M.general.sharedSplit)} / ${pctf(1 - M.general.sharedSplit)} unless you pick one person. Interest paid into a Malaysian account goes into that account on the Wallet page instead of a fund, and still counts for tax.</p>`;
   }
 
   // ======================================================================
@@ -2279,6 +2280,9 @@
       rec.account = (fundOf(rec.fund) || {}).account || interestAccounts()[0];
       rec.fund = E.interestFundIn(rec.account, state.M.funds) || rec.fund;
     }
+    // Paid straight into a Wallet account (e.g. in Malaysia): the account picker shows that account.
+    if (rec.walletId && kind === 'income') rec.intoFund = 'w:' + rec.walletId;
+    if (rec.walletId && kind === 'interest') rec.account = 'w:' + rec.walletId;
     // Income is either wages (days × hours) or other income (an amount).
     let payType = null;
     if (kind === 'income') {
@@ -2419,6 +2423,33 @@
   const fundSelect = (name, value, defaultLabel) => `<select name="${name}"><option value="">${esc(defaultLabel)}</option>${state.M.accounts.map(a =>
     `<optgroup label="${esc(aIcon(a))} ${esc(a)}">${fundsIn(a).map(f => `<option value="${esc(f)}"${f === value ? ' selected' : ''}>${esc(fIcon(f))} ${esc(f)}</option>`).join('')}</optgroup>`).join('')}</select>`;
 
+  /** Wallet accounts income can be paid straight into: not the three fund accounts, not cards or loans. */
+  const incomeWallets = keepId => state.M.wallets.filter(w => !w.linked && !w.debt && (!w.closed || w.id === keepId));
+  /** Those accounts as <option>s grouped by country, value "w:<id>". The other person's hidden account stays as it is. */
+  const walletOptions = value => {
+    const keep = /^w:/.test(value || '') ? value.slice(2) : '';
+    return WALLET_PLACES.map(p => {
+      const list = incomeWallets(keep).filter(w => w.country === p[0]);
+      return list.length ? `<optgroup label="${p[2]} ${p[3]} · Wallet">${list.map(w => `<option value="w:${esc(w.id)}"${'w:' + w.id === value ? ' selected' : ''}>${esc(w.name)}</option>`).join('')}</optgroup>` : '';
+    }).join('') + (keep === 'private' ? '<option value="w:private" selected>🔒 Private account</option>' : '');
+  };
+  /** The Wallet account an income or interest form pays into ({ id, name, currency, owner }), or null for a fund. */
+  const formWallet = v => {
+    if (!/^w:/.test(v || '')) return null;
+    const id = v.slice(2);
+    return wOf(id) || { id, name: 'Private account', currency: (state.form && state.form.rec.currency) === 'MYR' ? 'MYR' : 'AUD', owner: '' };
+  };
+  /** An income or interest entry's Wallet account, for lists: "🇲🇾 Maybank". */
+  const walletLabel = x => {
+    const w = wOf(x.walletId);
+    return (w ? wPlace(w.currency)[2] : x.myr !== null ? '🇲🇾' : '🔒') + ' ' + (w ? w.name : x.walletName || 'Private account');
+  };
+  const formWalletLabel = w => walletLabel({ walletId: w.id, walletName: w.name, myr: w.currency === 'MYR' ? 0 : null });
+  /** Where an interest entry went: its bank account, or its Wallet account. */
+  const interestAcct = r => (r.wallet ? walletLabel(r.wallet) : r.account);
+  /** The amount as it landed in the Wallet account: " · RM 50.00" (for ringgit), else nothing. */
+  const walletAmt = x => (x && x.myr !== null ? ' · ' + myr(x.myr) : '');
+
   /** The funds in one bank account. */
   const accountFunds = (name, value, account) => `<select name="${name}">${fundsIn(account).map(f => `<option value="${esc(f)}"${f === value ? ' selected' : ''}>${esc(fIcon(f))} ${esc(f)}</option>`).join('')}</select>`;
 
@@ -2480,9 +2511,11 @@
   }
 
   /** Calculator keypad for amounts. With `withCurrency`, the amount can be typed in MYR at an editable rate. */
-  function keypad(withCurrency) {
+  /** `lock`: the currency is fixed (an account in that currency), so there's no AUD / MYR switch. */
+  function keypad(withCurrency, lock) {
     const F = state.form;
     const c = F.calc;
+    if (withCurrency && lock) c.cur = lock;
     F.calcCurrency = !!withCurrency;
     const myrMode = withCurrency && c.cur === 'MYR';
     const keys = ['7', '8', '9', '÷', '4', '5', '6', '×', '1', '2', '3', '−', '.', '0', '⌫', '+'];
@@ -2490,7 +2523,7 @@
       <input type="hidden" name="amount" value="${esc(F.rec.amount)}">
       ${withCurrency ? '<input type="hidden" name="currency" value=""><input type="hidden" name="fxAmount" value=""><input type="hidden" name="fxRate" value="">' : ''}
       <div class="calc-screen">
-        <div class="spread">${withCurrency ? `<div class="mini-tabs" role="group" aria-label="Currency">${['AUD', 'MYR'].map(k =>
+        <div class="spread">${withCurrency && lock ? `<span class="muted small">${lock}</span>` : withCurrency ? `<div class="mini-tabs" role="group" aria-label="Currency">${['AUD', 'MYR'].map(k =>
           `<button type="button" data-act="calc-cur" data-key="${k}" aria-pressed="${c.cur === k}">${k}</button>`).join('')}</div>` : `<span class="muted small">${c.fixed || 'AUD'}</span>`}
           <span class="calc-expr" id="calc-expr">&nbsp;</span></div>
         <div class="calc-value" id="calc-value" aria-live="polite"></div>
@@ -2574,10 +2607,11 @@
         `<button type="button" data-act="form-paytype" data-key="${k}" aria-pressed="${F.payType === k}">${l}</button>`).join('')}</div>` : '';
       if (F.payType === 'other') {
         const taxable = r.otherTaxable === 'Yes' ? 'Yes' : '';
+        const into = formWallet(r.intoFund);
         body = typeSeg + `
-        ${keypad(true)}
+        ${keypad(true, into ? into.currency : '')}
         <div class="field"><span>Who received it?</span>${who(r.person, people)}</div>
-        <label class="field"><span>Put it into</span>${fundSelect('intoFund', r.intoFund, 'Split like pay (budget %)')}</label>
+        <label class="field"><span>Put it into</span>${fundSelect('intoFund', r.intoFund, 'Split like pay (budget %)').replace(/<\/select>$/, walletOptions(r.intoFund) + '</select>')}</label>
         <p class="muted small" style="margin:-4px 0 0">Bank interest? ${F.isNew ? '<button type="button" class="btn link sm" data-act="form-kind" data-key="interest" style="padding:0;min-height:0">Record it as 🏦 Interest</button>' : 'Record it as 🏦 Interest'} instead: it goes straight into one fund, not split by the budget %.</p>
         <div class="field"><span>Counts as taxable income?</span><input type="hidden" name="otherTaxable" value="${taxable}">
           <div class="who" role="group">${[['', 'No · gift, refund, cashback'], ['Yes', 'Yes · side job, cash work']].map(([v, l]) =>
@@ -2704,10 +2738,14 @@
         <div class="two">${field('Date', 'date', r.date, 'type="date" required')}
           ${field('Note', 'note', r.note, 'type="text" placeholder="e.g. Wise, sent home"')}</div>`;
     } else if (F.kind === 'interest') {
-      const acctOpts = `<select name="account">${interestAccounts().map(a => `<option value="${esc(a)}"${a === r.account ? ' selected' : ''}>${esc(aIcon(a))} ${esc(a)}</option>`).join('')}</select>`;
-      const fundOpts = `<input type="hidden" name="fund" value="${esc(r.fund)}"><div class="fixed-fund">${esc(fIcon(r.fund))} ${esc(r.fund)}</div>`;
+      const intoW = formWallet(r.account);
+      const wOpts = walletOptions(r.account);
+      const banks = interestAccounts().map(a => `<option value="${esc(a)}"${a === r.account ? ' selected' : ''}>${esc(aIcon(a))} ${esc(a)}</option>`).join('');
+      const acctOpts = `<select name="account">${wOpts ? `<optgroup label="🇦🇺 Savings accounts">${banks}</optgroup>${wOpts}` : banks}</select>`;
+      const fundOpts = intoW ? `<input type="hidden" name="fund" value=""><div class="fixed-fund">${esc(formWalletLabel(intoW))}</div>`
+        : `<input type="hidden" name="fund" value="${esc(r.fund)}"><div class="fixed-fund">${esc(fIcon(r.fund))} ${esc(r.fund)}</div>`;
       body = `
-        ${keypad(false)}
+        ${intoW ? keypad(true, intoW.currency) : keypad(false)}
         <div class="two"><label class="field"><span>Bank account</span>${acctOpts}</label><div class="field"><span>Goes into</span>${fundOpts}</div></div>
         <div class="field"><span>Whose interest?</span>${who(r.person, people.concat([['Shared', 'Shared']]))}</div>
         <div class="two">${field('Date paid', 'date', r.date, 'type="date" required')}
@@ -2800,9 +2838,12 @@
     if (F.kind === 'income' && F.payType === 'other') {
       const amt = Number(r.amount) || 0;
       const c = E.compute({ settings: state.app.data.settings, income: [{ id: 'preview', date: r.date, person: r.person, days: 0, otherNet: amt, intoFund: r.intoFund }] }).income[0];
-      const into = r.intoFund ? `${esc(fIcon(r.intoFund))} ${esc(r.intoFund)} <span class="muted small">${esc((fundOf(r.intoFund) || {}).account || '')}</span>` : 'Split across funds like pay';
+      const w = formWallet(r.intoFund);
+      const into = w ? `${esc(formWalletLabel(w))} <span class="muted small">Wallet</span>`
+        : r.intoFund ? `${esc(fIcon(r.intoFund))} ${esc(r.intoFund)} <span class="muted small">${esc((fundOf(r.intoFund) || {}).account || '')}</span>` : 'Split across funds like pay';
       el.innerHTML = line('Adds', `<strong class="pos">+${money(amt)}</strong>`) + myrLine() + line('Goes into', into) +
         line('Tax', r.otherTaxable === 'Yes' ? 'Counted as taxable income' : 'Not taxable') +
+        (w ? '<span class="muted small">It adds to that account’s balance on the Wallet page. No fund gets it, as the money isn’t in your Australian accounts.</span>' : '') +
         (c && !r.intoFund && amt ? `<div style="margin-top:6px">${stackBar(M.fundNames.map(f => ({ label: f, value: c.alloc[f], colour: fColour(f) })))}</div>
           <div class="legend">${M.fundNames.map(f => `<span><span class="dot" style="--c:${fColour(f)}"></span>${esc(f)} ${money(c.alloc[f])}</span>`).join('')}</div>` : '');
     } else if (F.kind === 'income') {
@@ -2873,8 +2914,11 @@
       const fy = /^\d{4}-\d{2}-\d{2}$/.test(r.date || '') ? E.fyOf(r.date) : M.currentFY;
       const p1 = M.general.sharedSplit;
       const split = r.person === 'Shared' ? M.codes.map((c, i) => esc(pName(c)) + ' ' + money(i === 0 ? amt * p1 : amt - amt * p1)).join(' · ') : esc(pName(r.person)) + ' ' + money(amt);
-      el.innerHTML = line(`${esc(aIcon(r.account))} ${esc(r.account)} · ${esc(r.fund)}`, '+' + money(amt), ' pos') +
-        line('Taxable income ' + fyName(fy), split) + '<span class="muted small">All of it goes into this one fund (not split by the budget %), and into the year-end tax estimate.</span>';
+      const w = formWallet(r.account);
+      el.innerHTML = (w ? line(esc(formWalletLabel(w)), '+' + money(amt), ' pos') + myrLine()
+        : line(`${esc(aIcon(r.account))} ${esc(r.account)} · ${esc(r.fund)}`, '+' + money(amt), ' pos')) +
+        line('Taxable income ' + fyName(fy), split) + (w ? '<span class="muted small">It adds to that account’s balance on the Wallet page (no fund gets it), and counts in the year-end tax estimate.</span>'
+          : '<span class="muted small">All of it goes into this one fund (not split by the budget %), and into the year-end tax estimate.</span>');
     } else {
       const amt = money(Number(r.amount) || 0);
       const acctOf = f => esc((fundOf(f) || {}).account || '');
@@ -3011,7 +3055,11 @@
       if (!cross) Object.assign(payload, { rate: '', received: '' });
     }
     if (F.kind === 'expenses') payload.splitPct = payload.person === 'Shared' && !blank(payload.splitPct) ? Number(payload.splitPct) / 100 : '';
-    if (F.kind === 'interest') delete payload.account;
+    if (F.kind === 'interest') {
+      const w = formWallet(payload.account);
+      Object.assign(payload, w ? { walletId: w.id, walletName: w.name, fund: '', at: payload.at || Date.now() } : { walletId: '', walletName: '', at: '' });
+      delete payload.account;
+    }
     if (F.kind === 'adjustments') {
       if (F.adjType === 'Add') payload.fromFund = '';
       if (F.adjType === 'Deduct') payload.toFund = '';
@@ -3021,9 +3069,11 @@
     }
     if (F.kind === 'income' && F.payType === 'other') {
       Object.assign(payload, { otherNet: payload.amount, days: 0, hoursPerDay: '', extraHours: '', rate: '', scale: '', actualTax: '' });
-    }
+      const w = formWallet(payload.intoFund);
+      Object.assign(payload, w ? { walletId: w.id, walletName: w.name, intoFund: '', at: payload.at || Date.now() } : { walletId: '', walletName: '', at: '' });
+    } else if (F.kind === 'income') Object.assign(payload, { walletId: '', walletName: '' });
     if (F.kind === 'income') delete payload.amount;
-    if (F.kind !== 'expenses' && F.kind !== 'wallets' && F.kind !== 'bills' && !(F.kind === 'income' && F.payType === 'other')) {
+    if (F.kind !== 'expenses' && F.kind !== 'wallets' && F.kind !== 'bills' && !(F.kind === 'income' && F.payType === 'other') && !(F.kind === 'interest' && payload.walletId)) {
       delete payload.currency;
       delete payload.fxAmount;
       delete payload.fxRate;
@@ -3593,6 +3643,15 @@
       const saved = (state.app.data.wallets || []).find(r => String(r.id) === key);
       openForm('wallets', saved || { id: w.id, date: w.date, name: w.name, currency: w.currency, type: w.type, owner: w.owner, number: '', opening: '', colour: WALLET_COLOUR, badge: '', logo: '', note: '', closed: '' }, { isNew: false });
     } else if (act === 'wallet-update') openForm('walletChecks', newRecord('walletChecks', { walletId: key }), { isNew: true });
+    else if (act === 'wallet-income' || act === 'wallet-interest') {
+      // Money paid straight into this account (e.g. a Malaysian bank): typed in its currency.
+      const w = wOf(key);
+      const kind = act === 'wallet-income' ? 'income' : 'interest';
+      const owner = w.owner === 'Shared' ? '' : w.owner;
+      const rec = Object.assign(newRecord(kind, owner ? { person: owner } : null), { walletId: w.id, currency: w.currency === 'MYR' ? 'MYR' : '', fxAmount: '', fxRate: '' });
+      if (kind === 'interest' && !owner) rec.person = 'Shared';
+      openForm(kind, rec, { isNew: true, payType: 'other' });
+    }
     else if (act === 'wallet-transfer') walletTransferForm(key);
     else if (act === 'wallet-type') { readForm(); state.form.rec.type = key; renderForm(); }
     else if (act === 'wallet-cur') {
@@ -3908,6 +3967,36 @@
       return;
     }
     if (state.form && state.form.kind === 'expenses' && el.name === 'fund') { readForm(); renderForm(); return; }
+    // Income or interest into a Wallet account is typed in that account's currency.
+    const toCurrency = cur => {
+      const F = state.form;
+      if (F.calc.cur === cur) return;
+      F.calc.cur = cur;
+      F.calc.expr = '';
+      Object.assign(F.rec, { amount: '', currency: '', fxAmount: '', fxRate: '' });
+    };
+    if (state.form && state.form.kind === 'income' && el.name === 'intoFund') {
+      readForm();
+      const w = formWallet(el.value);
+      if (w) toCurrency(w.currency);
+      renderForm();
+      return;
+    }
+    if (state.form && state.form.kind === 'interest' && el.name === 'account') {
+      readForm();
+      const r = state.form.rec;
+      const w = formWallet(el.value);
+      if (w) {
+        toCurrency(w.currency);
+        if (w.owner) r.person = w.owner;
+      } else {
+        toCurrency('AUD');
+        r.fund = E.interestFundIn(el.value, state.M.funds) || fundsIn(el.value)[0] || '';
+        r.person = /shared/i.test(el.value) ? 'Shared' : (r.person === 'Shared' ? state.M.codes[0] : r.person);
+      }
+      renderForm();
+      return;
+    }
     if (state.form && (el.name === 'fromAccount' || el.name === 'toAccount' || el.name === 'account')) {
       // Keep the fund inside the chosen account.
       readForm();

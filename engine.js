@@ -37,6 +37,17 @@ function TrackerEngine() {
   // ---------- value helpers ----------
 
   const isBlank = v => v === '' || v === null || v === undefined;
+  /**
+   * Income or interest paid straight into a Wallet account (e.g. a Malaysian bank) instead of a fund:
+   * it still counts as income (and for tax), but no fund gets it. `aud` is the AUD amount it counts as;
+   * `myr` is the ringgit typed in, if it was typed in MYR.
+   */
+  const walletPart = (r, aud) => {
+    const walletId = String(r.walletId || '').trim();
+    if (!walletId) return null;
+    const myr = String(r.currency || '').trim() === 'MYR' && num(r.fxAmount) ? round2(num(r.fxAmount)) : null;
+    return { walletId, walletName: String(r.walletName || '').trim(), aud, myr, fxRate: myr !== null ? num(r.fxRate) : '', at: num(r.at) };
+  };
 
   function num(v) {
     if (isBlank(v)) return 0;
@@ -459,20 +470,21 @@ function TrackerEngine() {
       if (!ty) warn('No tax-year settings for ' + fy + ', so super shows as $0. Add a row in Settings → Tax tables.');
       const superRate = ty ? ty.superRate : 0;
       const otherNet = round2(num(r.otherNet)); // other income (gift, refund, side job…): added to net, no super
-      const intoFund = fundNames.indexOf(String(r.intoFund || '').trim()) >= 0 ? String(r.intoFund).trim() : '';
+      const wallet = otherNet ? walletPart(r, otherNet) : null; // only other income can go into a Wallet account
+      const intoFund = !wallet && fundNames.indexOf(String(r.intoFund || '').trim()) >= 0 ? String(r.intoFund).trim() : '';
       const otherTaxable = otherNet && yes(r.otherTaxable) ? otherNet : 0;
       const net = round2(gross - tax + otherNet);
       const version = allocationFor(r.date, S.allocations);
       const alloc = {};
       // Pay is split by the budget %; other income too, unless it goes into one chosen fund.
-      const splitPart = intoFund ? net - otherNet : net;
+      const splitPart = intoFund || wallet ? net - otherNet : net;
       fundNames.forEach(f => { alloc[f] = version ? splitPart * (version.pct[f] || 0) : 0; });
       if (intoFund) alloc[intoFund] += otherNet;
       return {
         id: r.id, date: r.date, person: p.code, fy, month: monthOf(r.date), week: weekStart(r.date),
         days, hoursPerDay, extraHours, hours, rate, scale, gross, calcTax, actualTax, tax,
         taxDiff: hasActual ? round2(actualTax - calcTax) : 0,
-        otherNet, intoFund, otherTaxable, net, superRate, superAmt: round2(gross * superRate), alloc, note: r.note || '',
+        otherNet, intoFund, wallet, otherTaxable, net, superRate, superAmt: round2(gross * superRate), alloc, note: r.note || '',
         transferred: validDate(String(r.transferred || '')) ? r.transferred : '',
         isPay: gross > 0, // wages; other income alone (gift, refund…) isn't moved to the savings accounts
       };
@@ -531,10 +543,11 @@ function TrackerEngine() {
     // --- bank interest (adds to a fund, and counts as taxable income) ---
     const interest = (data.interest || []).map(r => {
       if (!validDate(r.date)) { warn('An interest entry has no valid date and was skipped.'); return null; }
-      const saved = String(r.fund || '').trim();
-      if (!fundAccount[saved]) { warn('Interest on ' + r.date + ' uses unknown fund "' + saved + '" and was skipped.'); return null; }
-      const fund = interestFundIn(fundAccount[saved], S.funds); // whatever fund was picked, the account's interest fund gets it
       const amount = round2(num(r.amount));
+      const wallet = walletPart(r, amount); // paid into a Wallet account (e.g. in Malaysia): no fund gets it
+      const saved = String(r.fund || '').trim();
+      if (!wallet && !fundAccount[saved]) { warn('Interest on ' + r.date + ' uses unknown fund "' + saved + '" and was skipped.'); return null; }
+      const fund = wallet ? '' : interestFundIn(fundAccount[saved], S.funds); // whatever fund was picked, the account's interest fund gets it
       const shares = {};
       if (r.person === SHARED && codes.length >= 2) {
         shares[codes[0]] = round2(amount * S.general.sharedSplit);
@@ -547,7 +560,7 @@ function TrackerEngine() {
       }
       return {
         id: r.id, date: r.date, month: monthOf(r.date), fy: fyOf(r.date), person: r.person,
-        fund, account: fundAccount[fund], amount, shares, note: r.note || '',
+        fund, account: wallet ? '' : fundAccount[fund], wallet, amount, shares, note: r.note || '',
       };
     }).filter(Boolean).sort(byDate);
 
@@ -646,7 +659,7 @@ function TrackerEngine() {
       });
     });
     interest.forEach(r => {
-      if (r.date < start) return;
+      if (r.date < start || r.wallet) return;
       Object.keys(r.shares).forEach(c => [c, ALL].forEach(k => { balances[k].funds[r.fund].interest += r.shares[c]; }));
     });
     keys.forEach(k => {
@@ -715,7 +728,7 @@ function TrackerEngine() {
       });
     });
     interest.forEach(r => {
-      if (r.date < start) return;
+      if (r.date < start || r.wallet) return;
       Object.keys(r.shares).forEach(c => [c, ALL].forEach(k => bump(k, r.account, r.month, 'interest', r.shares[c])));
     });
     const flowIn = x => x.allocated + x.interest + x.transferIn + x.added;
@@ -815,6 +828,13 @@ function TrackerEngine() {
         if (t.from === w) events.push(Object.assign({ delta: -t.left }, base));
         if (t.to === w) events.push(Object.assign({ delta: t.received }, base));
       });
+      // Income and interest paid straight into this account, in its own currency.
+      const inWallet = x => (w.currency === 'MYR' ? (x.myr !== null ? x.myr : round2(x.aud * (x.fxRate || S.general.exchangeRate))) : x.aud);
+      [['income', income, 'Income'], ['interest', interest, 'Interest']].forEach(([kind, list, label]) => list.forEach(r => {
+        if (!r.wallet || r.wallet.walletId !== w.id) return;
+        events.push({ kind, id: r.id, date: r.date, month: r.month, at: r.wallet.at, rank: 0, delta: inWallet(r.wallet),
+          title: kind === 'income' ? r.note || label : label, note: kind === 'interest' ? r.note : (r.person ? (byCode[r.person] || {}).name || r.person : ''), inflow: true });
+      }));
       events.sort(eventOrder);
       let running = w.start;
       w.checked = w.date;
