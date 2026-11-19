@@ -496,8 +496,9 @@ function TrackerEngine() {
       const amount = round2(num(r.amount));
       const category = String(r.category || '').trim();
       const chosen = String(r.fund || '').trim();
-      const fund = fundNames.indexOf(chosen) >= 0 ? chosen : (catFund[category] || '');
-      if (!fund) warn('Expense category "' + category + '" has no fund, so it is left out of fund balances. Map it in Settings → Categories.');
+      const wallet = walletPart(r, amount); // paid from a Wallet account (e.g. in Malaysia): no fund pays it
+      const fund = wallet ? '' : fundNames.indexOf(chosen) >= 0 ? chosen : (catFund[category] || '');
+      if (!fund && !wallet) warn('Expense category "' + category + '" has no fund, so it is left out of fund balances. Map it in Settings → Categories.');
       const shares = {};
       let splitPct = null;
       if (r.person === SHARED && codes.length >= 2) {
@@ -512,10 +513,11 @@ function TrackerEngine() {
       }
       // A shared expense paid from a joint account (e.g. Tuition Fund in Shared Saving) is paid by
       // both of you already, so nobody owes anyone for it, whoever was picked as the payer.
-      const joint = r.person === SHARED && jointAccount(fundAccount[fund]);
+      // From a Malaysian account: joint when the account is shared (only shared ones are known to both of you).
+      const joint = r.person === SHARED && (wallet ? (data.wallets || []).some(w => String(w.id) === wallet.walletId && w.owner === SHARED) : jointAccount(fundAccount[fund]));
       return {
         id: r.id, date: r.date, month: monthOf(r.date), fy: fyOf(r.date), person: r.person,
-        amount, category, description: r.description || '', splitPct, fund, shares,
+        amount, category, description: r.description || '', splitPct, fund, wallet, shares,
         paidBy: !joint && byCode[r.paidBy] ? r.paidBy : '', joint,
       };
     }).filter(Boolean).sort(byDate);
@@ -828,12 +830,14 @@ function TrackerEngine() {
         if (t.from === w) events.push(Object.assign({ delta: -t.left }, base));
         if (t.to === w) events.push(Object.assign({ delta: t.received }, base));
       });
-      // Income and interest paid straight into this account, in its own currency.
+      // Income and interest paid straight into this account, and expenses paid from it, in its own currency.
       const inWallet = x => (w.currency === 'MYR' ? (x.myr !== null ? x.myr : round2(x.aud * (x.fxRate || S.general.exchangeRate))) : x.aud);
-      [['income', income, 'Income'], ['interest', interest, 'Interest']].forEach(([kind, list, label]) => list.forEach(r => {
+      const personName = c => (c === SHARED ? 'Shared' : (byCode[c] || {}).name || c || '');
+      [['income', income, 1], ['interest', interest, 1], ['expenses', expenses, -1]].forEach(([kind, list, sign]) => list.forEach(r => {
         if (!r.wallet || r.wallet.walletId !== w.id) return;
-        events.push({ kind, id: r.id, date: r.date, month: r.month, at: r.wallet.at, rank: 0, delta: inWallet(r.wallet),
-          title: kind === 'income' ? r.note || label : label, note: kind === 'interest' ? r.note : (r.person ? (byCode[r.person] || {}).name || r.person : ''), inflow: true });
+        const title = kind === 'income' ? r.note || 'Income' : kind === 'interest' ? 'Interest' : r.description || r.category;
+        const note = kind === 'interest' ? r.note : kind === 'income' ? personName(r.person) : (r.description ? r.category + ' · ' : '') + personName(r.person);
+        events.push({ kind, id: r.id, date: r.date, month: r.month, at: r.wallet.at, rank: 0, delta: sign * inWallet(r.wallet), title, note });
       }));
       events.sort(eventOrder);
       let running = w.start;

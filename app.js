@@ -391,7 +391,7 @@
           items.push({
             date: r.date, kind: 'expenses', id: r.id, icon: tile(cIcon(r.category), cColour(r.category)),
             title: esc(r.category) + (r.person === 'Shared' ? ' <span class="tag">Shared</span>' : ''),
-            sub: [r.description ? esc(r.description) : '', r.person === 'Shared' ? M.codes.map(c => esc(pName(c)) + ' ' + money(r.shares[c])).join(' / ') : esc(pName(r.person)), r.fund ? esc(r.fund) : '<span class="flag">no fund</span>'].filter(Boolean).join(' · '),
+            sub: [r.description ? esc(r.description) : '', r.person === 'Shared' ? M.codes.map(c => esc(pName(c)) + ' ' + money(r.shares[c])).join(' / ') : esc(pName(r.person)), r.fund ? esc(r.fund) : r.wallet ? 'from ' + esc(walletLabel(r.wallet)) + walletAmt(r.wallet) : '<span class="flag">no fund</span>'].filter(Boolean).join(' · '),
             amt: '−' + money(share),
             small: sel !== 'All' && r.person === 'Shared' ? 'your share' : '',
             value: -share,
@@ -655,8 +655,9 @@
     M.expenses.filter(r => (tab === 'All' || r.person === tab) && (q || r.month === state.month)).forEach(r => items.push({
       date: r.date, kind: 'expenses', id: r.id, icon: tile(cIcon(r.category), cColour(r.category), 'round'),
       title: esc(r.description || r.category),
-      sub: (r.person === 'Shared' ? 'Shared · ' + M.codes.map(c => esc(pName(c)) + ' ' + money(r.shares[c])).join(' / ') : esc(pName(r.person)) + ' spent') + (r.description ? ' · ' + esc(r.category) : ''),
-      text: [r.description, r.category, pName(r.person), r.person, r.fund, r.amount.toFixed(2)].join(' '),
+      sub: (r.person === 'Shared' ? 'Shared · ' + M.codes.map(c => esc(pName(c)) + ' ' + money(r.shares[c])).join(' / ') : esc(pName(r.person)) + ' spent') + (r.description ? ' · ' + esc(r.category) : '') +
+        (r.wallet ? ' · from ' + esc(walletLabel(r.wallet)) + walletAmt(r.wallet) : ''),
+      text: [r.description, r.category, pName(r.person), r.person, r.fund, r.wallet ? walletLabel(r.wallet) : '', r.amount.toFixed(2)].join(' '),
       amt: '−' + money(r.amount), small: '', inc: 0, out: r.amount,
     }));
     M.interest.filter(r => (tab === 'All' || r.person === tab) && (q || r.month === state.month)).forEach(r => items.push({
@@ -1168,7 +1169,7 @@
       const t = e.transfer;
       if (e.title) {
         return { date: e.date, kind: e.kind, id: e.id, icon: tile({ income: '💼', expenses: '🧾', interest: '🏦' }[e.kind] || '🔁', '#64748B', 'round'), value: 0, title: esc(e.title), sub: esc(e.note),
-          amt: `<span class="${e.change > 0 ? 'pos' : ''}">${wSigned(e.change, cur)}</span>`, small: wMoney(e.balance, cur) };
+          amt: `<span class="${e.change > 0 ? 'pos' : ''}">${wSigned(e.change, cur)}</span>`, small: wMoney(flip(e.balance), cur) };
       }
       if (!t) {
         return { date: e.date, kind: e.kind, id: e.id, icon: tile('⚖️', '#64748B', 'round'), value: 0, title: 'Balance updated', sub: esc(e.note),
@@ -1201,7 +1202,7 @@
       <div class="wsolo">${walletCard(w, true)}</div>
       ${w.closed ? '<div class="notice">This account is closed, so it isn’t counted in your totals.</div>' : ''}
       <div class="two wactions"><button class="btn" data-act="wallet-transfer" data-key="${esc(w.id)}">🔁 Transfer</button><button class="btn" data-act="wallet-update" data-key="${esc(w.id)}">⚖️ ${w.linked ? 'Fix balance' : 'Update balance'}</button></div>
-      ${!w.linked && !w.debt && !w.closed ? `<div class="two wactions"><button class="btn" data-act="wallet-income" data-key="${esc(w.id)}">💰 Add income</button><button class="btn" data-act="wallet-interest" data-key="${esc(w.id)}">🏦 Add interest</button></div>` : ''}
+      ${!w.linked && !w.closed ? `<div class="wactions" style="display:grid;gap:10px;grid-template-columns:repeat(${w.debt ? 1 : 3}, minmax(0, 1fr))"><button class="btn" data-act="wallet-expense" data-key="${esc(w.id)}" style="width:100%">🧾 Expense</button>${w.debt ? '' : `<button class="btn" data-act="wallet-income" data-key="${esc(w.id)}">💰 Income</button><button class="btn" data-act="wallet-interest" data-key="${esc(w.id)}">🏦 Interest</button>`}</div>` : ''}
       <div style="text-align:center">${monthNav()}</div>
       <div class="stats">${stat('Money in', wMoney(W.in, cur))}${stat('Money out', wMoney(W.out, cur))}</div>
       <section class="card"><div class="card-head"><h2>${w.debt ? 'Owed' : 'Balance'} in ${MONTHS[+m.slice(5, 7) - 1]}</h2></div>
@@ -2283,6 +2284,7 @@
     // Paid straight into a Wallet account (e.g. in Malaysia): the account picker shows that account.
     if (rec.walletId && kind === 'income') rec.intoFund = 'w:' + rec.walletId;
     if (rec.walletId && kind === 'interest') rec.account = 'w:' + rec.walletId;
+    if (rec.walletId && kind === 'expenses') rec.fund = 'w:' + rec.walletId;
     // Income is either wages (days × hours) or other income (an amount).
     let payType = null;
     if (kind === 'income') {
@@ -2328,7 +2330,11 @@
   const spendFund = r => r.fund || (state.M.categories.find(c => c.name === r.category) || {}).fund || '';
   const spendAccount = r => (fundOf(spendFund(r)) || {}).account || '';
   /** A Shared expense paid from a joint account (e.g. Tuition Fund in Shared Saving): both of you paid it, nobody owes. */
-  const jointSpend = r => r.person === 'Shared' && E.jointAccount(spendAccount(r));
+  const jointSpend = r => {
+    if (r.person !== 'Shared') return false;
+    const w = /^w:/.test(r.fund || '') ? formWallet(r.fund) : r.walletId ? wOf(r.walletId) : null;
+    return w ? w.owner === 'Shared' : E.jointAccount(spendAccount(r));
+  };
 
   /** "Who paid?": the two people, or "Both of you" when it comes out of a joint account. */
   function paidByField(r, label, people) {
@@ -2424,12 +2430,12 @@
     `<optgroup label="${esc(aIcon(a))} ${esc(a)}">${fundsIn(a).map(f => `<option value="${esc(f)}"${f === value ? ' selected' : ''}>${esc(fIcon(f))} ${esc(f)}</option>`).join('')}</optgroup>`).join('')}</select>`;
 
   /** Wallet accounts income can be paid straight into: not the three fund accounts, not cards or loans. */
-  const incomeWallets = keepId => state.M.wallets.filter(w => !w.linked && !w.debt && (!w.closed || w.id === keepId));
-  /** Those accounts as <option>s grouped by country, value "w:<id>". The other person's hidden account stays as it is. */
-  const walletOptions = value => {
+  const incomeWallets = (keepId, cards) => state.M.wallets.filter(w => !w.linked && (cards || !w.debt) && (!w.closed || w.id === keepId));
+  /** Those accounts as <option>s grouped by country, value "w:<id>". The other person's hidden account stays as it is. `cards`: expenses can be paid by card too. */
+  const walletOptions = (value, cards) => {
     const keep = /^w:/.test(value || '') ? value.slice(2) : '';
     return WALLET_PLACES.map(p => {
-      const list = incomeWallets(keep).filter(w => w.country === p[0]);
+      const list = incomeWallets(keep, cards).filter(w => w.country === p[0]);
       return list.length ? `<optgroup label="${p[2]} ${p[3]} · Wallet">${list.map(w => `<option value="w:${esc(w.id)}"${'w:' + w.id === value ? ' selected' : ''}>${esc(w.name)}</option>`).join('')}</optgroup>` : '';
     }).join('') + (keep === 'private' ? '<option value="w:private" selected>🔒 Private account</option>' : '');
   };
@@ -2637,14 +2643,15 @@
       const catFund = (M.categories.find(c => c.name === r.category) || {}).fund || '';
       const picks = descriptionPicks(r.category);
       const typed = String(r.description || '').trim().toLowerCase();
+      const fromW = formWallet(r.fund);
       body = `
-        ${keypad(true)}
+        ${keypad(true, fromW ? fromW.currency : '')}
         <div class="field"><span>Whose expense?</span>${who(r.person, people.concat([['Shared', 'Shared']]))}</div>
         ${paidByField(r, 'Who paid?', people)}
         ${r.person === 'Shared' ? splitField(r) : ''}
         <div class="field"><span>Category</span><input type="hidden" name="category" value="${esc(r.category)}">
           <div class="cat-grid">${M.categories.map(c => `<button type="button" class="cat-chip" data-act="form-cat" data-key="${esc(c.name)}" aria-pressed="${c.name === r.category}" style="--c:${fColour(c.fund)}" title="${esc(c.fund)}"><span class="e">${esc(cIcon(c.name))}</span>${esc(c.name)}</button>`).join('')}</div></div>
-        <label class="field"><span>Comes out of</span>${fundSelect('fund', r.fund, `Category’s fund: ${fIcon(catFund)} ${catFund} (${(fundOf(catFund) || {}).account || ''})`)}</label>
+        <label class="field"><span>Comes out of</span>${fundSelect('fund', r.fund, `Category’s fund: ${fIcon(catFund)} ${catFund} (${(fundOf(catFund) || {}).account || ''})`).replace(/<\/select>$/, walletOptions(r.fund, true) + '</select>')}</label>
         <div class="two">${field('Date', 'date', r.date, 'type="date" required')}
           ${field('Description', 'description', r.description, 'type="text" placeholder="Optional" list="desc-list" autocomplete="off"')}</div>
         <datalist id="desc-list">${picks.all.map(s => `<option value="${esc(s.text)}"></option>`).join('')}</datalist>
@@ -2874,7 +2881,10 @@
         const owed = r.person === 'Shared' ? (other === M.codes[0] ? amt * p1 : amt - amt * p1) : r.person === other ? amt : 0;
         if (owed > 0.004) split += line(`⚖️ ${esc(pName(other))} owes ${esc(pName(r.paidBy))}`, `<strong>${money(owed)}</strong>`);
       }
-      el.innerHTML = myrLine() + (fund ? line('Comes out of', `${esc(fIcon(fund))} ${esc(fund)}`) + (fundOf(fund) ? line('Bank account', esc(fundOf(fund).account)) : '') : line('Category', '—')) + split;
+      const fromW = formWallet(r.fund);
+      el.innerHTML = myrLine() + (fromW ? line('Comes out of', `${esc(formWalletLabel(fromW))} <span class="muted small">Wallet</span>`)
+        : fund ? line('Comes out of', `${esc(fIcon(fund))} ${esc(fund)}`) + (fundOf(fund) ? line('Bank account', esc(fundOf(fund).account)) : '') : line('Category', '—')) + split +
+        (fromW ? '<span class="muted small">It comes off that account’s balance on the Wallet page and counts as spending in its category. No fund pays it, as the money isn’t from your Australian accounts.</span>' : '');
     } else if (F.kind === 'paybacks') {
       const amt = Number(r.amount) || 0;
       const now = M.split.balance;
@@ -3055,6 +3065,11 @@
       if (!cross) Object.assign(payload, { rate: '', received: '' });
     }
     if (F.kind === 'expenses') payload.splitPct = payload.person === 'Shared' && !blank(payload.splitPct) ? Number(payload.splitPct) / 100 : '';
+    if (F.kind === 'expenses') {
+      // Paid from a Wallet account (e.g. a Malaysian bank or card) instead of a fund.
+      const w = formWallet(payload.fund);
+      Object.assign(payload, w ? { walletId: w.id, walletName: w.name, fund: '', at: payload.at || Date.now() } : { walletId: '', walletName: '', at: '' });
+    }
     if (F.kind === 'interest') {
       const w = formWallet(payload.account);
       Object.assign(payload, w ? { walletId: w.id, walletName: w.name, fund: '', at: payload.at || Date.now() } : { walletId: '', walletName: '', at: '' });
@@ -3643,7 +3658,14 @@
       const saved = (state.app.data.wallets || []).find(r => String(r.id) === key);
       openForm('wallets', saved || { id: w.id, date: w.date, name: w.name, currency: w.currency, type: w.type, owner: w.owner, number: '', opening: '', colour: WALLET_COLOUR, badge: '', logo: '', note: '', closed: '' }, { isNew: false });
     } else if (act === 'wallet-update') openForm('walletChecks', newRecord('walletChecks', { walletId: key }), { isNew: true });
-    else if (act === 'wallet-income' || act === 'wallet-interest') {
+    else if (act === 'wallet-expense') {
+      // Paid from this account (e.g. a Malaysian bank or card): typed in its currency, no fund pays it.
+      const w = wOf(key);
+      const owner = w.owner === 'Shared' ? '' : w.owner;
+      const rec = Object.assign(newRecord('expenses', owner ? { person: owner } : null), { walletId: w.id, currency: w.currency === 'MYR' ? 'MYR' : '', fxAmount: '', fxRate: '' });
+      if (owner && rec.person !== 'Shared') rec.paidBy = owner;
+      openForm('expenses', rec, { isNew: true });
+    } else if (act === 'wallet-income' || act === 'wallet-interest') {
       // Money paid straight into this account (e.g. a Malaysian bank): typed in its currency.
       const w = wOf(key);
       const kind = act === 'wallet-income' ? 'income' : 'interest';
@@ -3866,7 +3888,7 @@
       if ((F.kind === 'expenses' || F.kind === 'bills') && key !== 'Shared' && (!F.rec.paidBy || F.rec.paidBy === F.rec.person)) F.rec.paidBy = key; // usually you pay your own
       F.rec.person = key;
       renderForm();
-    } else if (act === 'form-cat') { readForm(); state.form.rec.category = key; state.form.rec.fund = ''; renderForm(); }
+    } else if (act === 'form-cat') { readForm(); state.form.rec.category = key; if (!/^w:/.test(state.form.rec.fund || '')) state.form.rec.fund = ''; renderForm(); } // a Wallet account stays chosen
     else if (act === 'form-step') {
       const input = $('#entry-form [name="' + key + '"]');
       const next = Math.max(key === 'extraHours' ? -1e9 : 0, (Number(input.value) || 0) + Number(el.dataset.step));
@@ -3890,7 +3912,7 @@
       const r = state.form.rec;
       r.description = key;
       const cat = el.dataset.cat;
-      if (cat && cat !== r.category && state.M.categories.some(c => c.name === cat)) { r.category = cat; r.fund = ''; } // the category it's usually in
+      if (cat && cat !== r.category && state.M.categories.some(c => c.name === cat)) { r.category = cat; if (!/^w:/.test(r.fund || '')) r.fund = ''; } // the category it's usually in (a Wallet account stays chosen)
       renderForm();
     }
     else if (act === 'form-from') { readForm(); state.form.rec.from = key; state.form.rec.to = state.M.codes.find(c => c !== key) || key; renderForm(); }
@@ -3966,8 +3988,7 @@
       renderForm();
       return;
     }
-    if (state.form && state.form.kind === 'expenses' && el.name === 'fund') { readForm(); renderForm(); return; }
-    // Income or interest into a Wallet account is typed in that account's currency.
+    // Money into or out of a Wallet account is typed in that account's currency.
     const toCurrency = cur => {
       const F = state.form;
       if (F.calc.cur === cur) return;
@@ -3975,6 +3996,16 @@
       F.calc.expr = '';
       Object.assign(F.rec, { amount: '', currency: '', fxAmount: '', fxRate: '' });
     };
+    if (state.form && state.form.kind === 'expenses' && el.name === 'fund') {
+      readForm();
+      const w = formWallet(el.value);
+      if (w) {
+        toCurrency(w.currency);
+        if (w.owner && w.owner !== 'Shared' && state.form.rec.person !== 'Shared') state.form.rec.paidBy = w.owner; // their account, so they paid
+      }
+      renderForm();
+      return;
+    }
     if (state.form && state.form.kind === 'income' && el.name === 'intoFund') {
       readForm();
       const w = formWallet(el.value);
