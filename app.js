@@ -973,7 +973,8 @@
     const order = M.categories.map(c => c.name).concat(Object.keys(catTotals).filter(c => !M.categories.some(x => x.name === c)));
     const used = order.filter(c => Math.abs(catTotals[c] || 0) > 0.004);
     const head = `<tr><th class="sticky">Month</th>${used.map(c => `<th class="num">${esc(cIcon(c))} ${esc(c)}</th>`).join('')}<th class="num">Total</th></tr>`;
-    const body = months.map(x => {
+    // Only months that have spending (no rows of dashes).
+    const body = months.filter(x => used.some(c => Math.abs((byMonth[x] || {})[c] || 0) > 0.004)).map(x => {
       const row = byMonth[x] || {};
       return `<tr><td class="sticky">${fmtMonth(x)}</td>${used.map(c => `<td class="num">${dash(row[c] || 0)}</td>`).join('')}<td class="num"><strong>${dash(sumOf(used, c => row[c] || 0))}</strong></td></tr>`;
     }).join('');
@@ -1047,7 +1048,7 @@
     const head = `<tr><th class="sticky"></th>${funds.map(f => `<th class="num">${esc(fIcon(f))} ${esc(f)}</th>`).join('')}<th class="num">Total</th></tr>`;
     const body = [
       row('Allocated from income', F => amount(F.allocated)),
-      B.months.map(m => row('Spent ' + fmtMonth(m), F => amount(-(F.monthly[m] || 0)))).join(''),
+      B.months.filter(m => funds.some(x => Math.abs(B.funds[x].monthly[m] || 0) > 0.004)).map(m => row('Spent ' + fmtMonth(m), F => amount(-(F.monthly[m] || 0)))).join(''), // months with spending only
       row('Adjustments', F => amount(F.adjustments)),
       row('Bank interest', F => amount(F.interest)),
       row('Balance', F => amount(F.balance, true), 'balance'),
@@ -1471,7 +1472,7 @@
       },
     });
     const head = `<tr><th class="sticky">Month</th>${accts.map(a => `<th class="num">${esc(aIcon(a))} ${esc(a)}</th>`).join('')}<th class="num">Total</th></tr>`;
-    const body = months.map(m => `<tr><td class="sticky">${fmtMonth(m)}</td>${accts.map(a => `<td class="num">${dash(cell(m, a))}</td>`).join('')}
+    const body = months.filter(m => accts.some(a => Math.abs(cell(m, a)) > 0.004)).map(m => `<tr><td class="sticky">${fmtMonth(m)}</td>${accts.map(a => `<td class="num">${dash(cell(m, a))}</td>`).join('')}
       <td class="num"><strong>${dash(sumOf(accts, a => cell(m, a)))}</strong></td></tr>`).join('');
     const foot = `<tr class="total"><td class="sticky">${fyName(fy)}</td>${accts.map(a => `<td class="num">${money(sumOf(inFy.filter(r => interestAcct(r) === a), share))}</td>`).join('')}<td class="num">${money(fyTotal)}</td></tr>`;
     const monthly = `<section class="card"><div class="card-head"><h2>Monthly</h2><span class="hint">${fyName(fy)}</span></div>
@@ -1529,7 +1530,8 @@
       },
     });
     const monthTable = table(`<tr><th>Month</th>${codes.map(c => `<th class="num">${esc(pName(c))}</th>`).join('')}</tr>`,
-      months.map(x => `<tr><td>${fmtMonth(x)}</td>${codes.map(c => `<td class="num">${dash(M.monthly[x] ? M.monthly[x].by[c].superAmt : 0)}</td>`).join('')}</tr>`).join(''));
+      months.filter(x => codes.some(c => M.monthly[x] && Math.abs(M.monthly[x].by[c].superAmt) > 0.004))
+        .map(x => `<tr><td>${fmtMonth(x)}</td>${codes.map(c => `<td class="num">${dash(M.monthly[x] ? M.monthly[x].by[c].superAmt : 0)}</td>`).join('')}</tr>`).join(''));
     const chartCard = `<section class="card"><div class="card-head"><h2>Monthly</h2><span class="hint">${fyName(fy)}</span></div>
       ${rows.length ? `<div class="chart-box"><canvas id="ch-super" role="img" aria-label="Super per month in ${fyName(fy)}"></canvas></div>
         <details class="more"><summary>View as table</summary>${monthTable}</details>` : empty('🦘', `No pay in ${fyName(fy)} yet.`)}</section>`;
