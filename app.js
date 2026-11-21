@@ -2745,7 +2745,7 @@
       body = `
         ${keypad(true, fromW ? fromW.currency : '')}
         <div class="field"><span>Category${lastUsed ? ' <span class="cat-note">· last used, tap to change</span>' : ''}</span><input type="hidden" name="category" value="${esc(r.category)}">
-          <div class="cat-grid">${shownCats.map(c => `<button type="button" class="cat-chip" data-act="form-cat" data-key="${esc(c.name)}" aria-pressed="${c.name === r.category}" style="--c:${fColour(c.fund)}" title="${esc(c.fund)}"><span class="e">${esc(cIcon(c.name))}</span><span class="cat-name">${esc(c.name).replace(/\//g, '/<wbr>')}</span></button>`).join('')}
+          <div class="cat-grid">${shownCats.map(c => `<button type="button" class="cat-chip" data-act="form-cat" data-key="${esc(c.name)}" aria-pressed="${c.name === r.category}" style="--c:${fColour(c.fund)}" title="${esc(c.fund)}"><span class="e">${esc(cIcon(c.name))}</span><span class="cat-name">${esc(c.name).split('/').join('/<wbr>')}</span></button>`).join('')}
             ${shownCats.length < ranked.length ? `<button type="button" class="cat-chip more" data-act="cat-more" aria-label="Show all ${ranked.length} categories"><span class="e">⋯</span>More (${ranked.length - shownCats.length})</button>` : ''}</div></div>
         <div class="field"><span>Whose expense?</span>${who(r.person, people.concat([['Shared', 'Shared']]))}</div>
         ${paidByField(r, 'Who paid?', people)}
@@ -2767,7 +2767,7 @@
         ${paidByField(r, 'Who pays it?', people)}
         ${r.person === 'Shared' ? splitField(r) : ''}
         <div class="field"><span>Category when paid</span><input type="hidden" name="category" value="${esc(r.category)}">
-          <div class="cat-grid">${M.categories.map(c => `<button type="button" class="cat-chip" data-act="form-cat" data-key="${esc(c.name)}" aria-pressed="${c.name === r.category}" style="--c:${fColour(c.fund)}" title="${esc(c.fund)}"><span class="e">${esc(cIcon(c.name))}</span><span class="cat-name">${esc(c.name).replace(/\//g, '/<wbr>')}</span></button>`).join('')}</div></div>
+          <div class="cat-grid">${M.categories.map(c => `<button type="button" class="cat-chip" data-act="form-cat" data-key="${esc(c.name)}" aria-pressed="${c.name === r.category}" style="--c:${fColour(c.fund)}" title="${esc(c.fund)}"><span class="e">${esc(cIcon(c.name))}</span><span class="cat-name">${esc(c.name).split('/').join('/<wbr>')}</span></button>`).join('')}</div></div>
         <div class="two">${field(r.done === 'Yes' ? 'Due date' : 'Next due date', 'date', r.date, 'type="date" required')}
           <label class="field"><span>Repeats</span><select name="repeat">${Object.keys(E.BILL_REPEATS).map(k => `<option value="${k}"${k === r.repeat ? ' selected' : ''}>${esc(E.BILL_REPEATS[k].label)}</option>`).join('')}</select></label></div>
         <div class="two"><label class="field"><span>Remind me</span><select name="before">${BILL_BEFORE.map(([d, l]) => `<option value="${d}"${Number(r.before) === d ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
