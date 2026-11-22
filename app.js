@@ -789,6 +789,16 @@
     }).join('');
     const foot = months.length ? `<tr class="total"><td class="sticky">Total</td>${codes.map(c => cellsFor(agg(rows.filter(r => r.person === c)))).join('')}${both ? `<td class="num">${money(T.net)}</td>` : ''}</tr>` : '';
 
+    // Where each month's money went: the budget split of net pay (+ other income into its fund), per category.
+    const funds = M.fundNames;
+    const allocHead = `<tr><th class="sticky">Month</th><th class="num">Net</th>${funds.map(f => `<th class="num">${esc(fIcon(f))} ${esc(f)}</th>`).join('')}</tr>`;
+    const allocCells = t => `<td class="num"><strong>${money(t.net)}</strong></td>${funds.map(f => `<td class="num">${dash(t.alloc[f])}</td>`).join('')}`;
+    const allocBody = months.map(m => `<tr><td class="sticky">${fmtMonth(m)}</td>${allocCells(agg(rows.filter(r => r.month === m)))}</tr>`).join('');
+    const allocFoot = months.length ? `<tr class="total"><td class="sticky">Total</td>${allocCells(T)}</tr>` : '';
+    const allocCard = funds.length ? `<section class="card"><div class="card-head"><h2>Allocated to each category</h2><span class="hint">${fyName(fy)}${both ? ' · both of you' : ''}</span></div>
+        ${months.length ? table(allocHead, allocBody, allocFoot, { key: 1 }) : empty('🗂️', `No pay in ${fyName(fy)} yet.`)}
+        <p class="muted small">Net pay split by your budget allocation (Settings → Allocation) for each pay date. Other income is split the same way, unless you sent it to one fund or a Wallet account (Wallet money isn't in a category).</p></section>` : '';
+
     const log = activity({ income: true }).filter(it => (M.income.find(r => r.id === it.id) || {}).fy === fy);
     return `
       <div class="section-title"><h1>Income</h1><div class="row">${fySelect(fy, 'fy')}${addBtn('income', 'Pay')}<button class="btn" data-act="add-other">💰 Other</button></div></div>
@@ -796,6 +806,7 @@
       <section class="card"><div class="card-head"><h2>Monthly</h2><span class="hint">${fyName(fy)}</span></div>
         ${months.length ? table(head, body, foot) : empty('💼', `No pay entered for ${fyName(fy)} yet.`, addBtn('income', 'Add pay'))}
         <p class="muted small">Tax uses the ATO weekly withholding formula for the pay date’s financial year. Enter the payslip tax to use the real figure; any difference is flagged.</p></section>
+      ${allocCard}
       <section class="card flush"><div class="card-head"><h2>Pay log</h2><span class="hint">Tap to edit</span></div>
         ${log.length ? txRows(log) : empty('💼', 'Nothing yet.')}</section>`;
   }
