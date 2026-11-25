@@ -225,8 +225,8 @@
   const fundsIn = account => state.M.fundNames.filter(f => fundOf(f).account === account);
   /** The funds whose money can be kept in an account (also Savings in GoalSaver), for transfers and balances. */
   const heldIn = account => (state.M.accountFunds && state.M.accountFunds[account]) || fundsIn(account);
-  /** How an adjustment saves a fund in an account: "Savings@GoalSaver" when it's not the fund's own account. */
-  const fundAt = (fund, account) => (!fund || !account || (fundOf(fund) || {}).account === account ? fund || '' : fund + '@' + account);
+  /** The account to tag on an adjustment's note when a fund is kept outside its own account (e.g. Savings in GoalSaver), else ''. */
+  const awayIn = (fund, account) => (fund && account && (fundOf(fund) || {}).account !== account ? account : '');
   /** Accounts that earn interest: all except the everyday spending account. */
   const interestAccounts = () => {
     const everyday = (fundOf('Living Expenses') || {}).account;
@@ -2421,10 +2421,12 @@
     if (kind === 'adjustments') {
       const from = E.fundRef(rec.fromFund);
       const to = E.fundRef(rec.toFund);
+      const tags = E.accountTags(rec.note);
       rec.fromFund = from.fund;
       rec.toFund = to.fund;
-      const fa = from.account || (fundOf(from.fund) || {}).account;
-      const ta = to.account || (fundOf(to.fund) || {}).account;
+      rec.note = tags.note;
+      const fa = from.account || tags.from || (fundOf(from.fund) || {}).account;
+      const ta = to.account || tags.to || (fundOf(to.fund) || {}).account;
       adjType = rec.fromFund && rec.toFund ? (fa && ta && fa !== ta ? 'Account' : 'Transfer') : rec.toFund ? 'Add' : 'Deduct';
       rec.fromAccount = fa || (adjType === 'Add' ? ta : '') || state.M.accounts[0];
       rec.toAccount = ta || (adjType !== 'Add' ? fa : '') || state.M.accounts[1] || state.M.accounts[0];
@@ -3259,8 +3261,8 @@
         const diff = E.round2(Number(payload.amount) - w.balance);
         if (Math.abs(diff) < 0.005) { toast('That’s already the balance.', true); return; }
         closeModal();
-        persist('adjustments', { id: newId('adjustments'), date: payload.date, person: w.owner === 'Shared' ? state.M.viewer : w.owner, fromFund: diff < 0 ? fundAt(payload.fund, w.linked) : '', toFund: diff > 0 ? fundAt(payload.fund, w.linked) : '',
-          amount: Math.abs(diff), note: payload.note || 'Balance fix' }, true, '✓ Balance fixed');
+        persist('adjustments', { id: newId('adjustments'), date: payload.date, person: w.owner === 'Shared' ? state.M.viewer : w.owner, fromFund: diff < 0 ? payload.fund : '', toFund: diff > 0 ? payload.fund : '',
+          amount: Math.abs(diff), note: E.tagNote(payload.note || 'Balance fix', diff < 0 ? awayIn(payload.fund, w.linked) : '', diff > 0 ? awayIn(payload.fund, w.linked) : '') }, true, '✓ Balance fixed');
         return;
       }
       payload.walletName = w.name;
@@ -3293,8 +3295,9 @@
       if (F.adjType === 'Account' && payload.fromAccount === payload.toAccount) { toast('Choose two different accounts.', true); return; }
       if (F.adjType === 'Transfer') payload.toAccount = payload.fromAccount;
       if (F.adjType === 'Transfer' && payload.fromFund === payload.toFund) { toast('Choose two different funds.', true); return; }
-      payload.fromFund = F.adjType === 'Add' ? '' : fundAt(payload.fromFund, payload.fromAccount);
-      payload.toFund = F.adjType === 'Deduct' ? '' : fundAt(payload.toFund, payload.toAccount);
+      if (F.adjType === 'Add') payload.fromFund = '';
+      if (F.adjType === 'Deduct') payload.toFund = '';
+      payload.note = E.tagNote(payload.note, awayIn(payload.fromFund, payload.fromAccount), awayIn(payload.toFund, payload.toAccount));
       delete payload.fromAccount;
       delete payload.toAccount;
     }
@@ -3336,7 +3339,8 @@
     const fee = { kind: 'expenses', remove: 'E-wt-' + t.id };
     if (from.linked || to.linked) {
       delete adjustment.remove;
-      adjustment.record = { id: 'A-wt-' + t.id, date: t.date, person: t.person, fromFund: from.linked ? fundAt(t.fromFund, from.linked) : '', toFund: to.linked ? fundAt(t.toFund, to.linked) : '', amount: to.linked ? x.received : x.converted, note: 'Wallet transfer: ' + route };
+      adjustment.record = { id: 'A-wt-' + t.id, date: t.date, person: t.person, fromFund: from.linked ? t.fromFund : '', toFund: to.linked ? t.toFund : '', amount: to.linked ? x.received : x.converted,
+        note: E.tagNote('Wallet transfer: ' + route, from.linked ? awayIn(t.fromFund, from.linked) : '', to.linked ? awayIn(t.toFund, to.linked) : '') };
     }
     if (x.fee) {
       delete fee.remove;
@@ -4167,7 +4171,7 @@
     else if (act === 'acct-transfer' || act === 'acct-open') {
       const M = state.M;
       const code = state.person !== 'All' ? state.person : (M.codes.indexOf(store.get('lastPerson')) >= 0 ? store.get('lastPerson') : M.codes[0]);
-      const first = a => fundAt(heldIn(a)[0] || '', a);
+      const first = a => heldIn(a)[0] || ''; // the account's own fund comes first
       if (act === 'acct-transfer') {
         const other = M.accounts.find(a => a !== key) || key;
         openForm('adjustments', { date: M.today, person: code, fromFund: first(key), toFund: first(other), amount: '', note: '' }, { isNew: true, adjType: 'Account' });

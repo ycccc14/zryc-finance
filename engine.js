@@ -78,9 +78,19 @@ function TrackerEngine() {
   const ALSO_HELD_WITH = { 'Savings': 'Emergency Fund' };
 
   /**
-   * A fund kept outside its own account is saved as "Fund@Account" in an adjustment's From / To fund
-   * (e.g. "Savings@GoalSaver"), so no new columns are needed. Plain "Savings" means its own account.
+   * A fund kept outside its own account: the account goes at the end of the adjustment's note, as
+   * "[from GoalSaver]" / "[to GoalSaver]" (the sheet only takes real fund names in From / To fund, and
+   * has no account column). No tag means the fund's own account. The app shows the note without them.
    */
+  const ACCOUNT_TAG = /\s*\[(from|to) ([^\]]+)\]/g;
+  function accountTags(note) {
+    const out = { note: String(note || ''), from: '', to: '' };
+    out.note = out.note.replace(ACCOUNT_TAG, (m, side, a) => { out[side] = a.trim(); return ''; }).trim();
+    return out;
+  }
+  const tagNote = (note, from, to) => [accountTags(note).note, from ? '[from ' + from + ']' : '', to ? '[to ' + to + ']' : ''].filter(Boolean).join(' ');
+
+  /** Older entries made in the app for a short while said "Savings@GoalSaver" in the fund itself. */
   function fundRef(v) {
     const s = String(v || '').trim();
     const i = s.lastIndexOf('@');
@@ -466,8 +476,9 @@ function TrackerEngine() {
     const heldIn = a => fundNames.filter(f => fundAccount[f] === a).concat(fundNames.filter(f => fundAccount[f] !== a &&
       ALSO_HELD_WITH[f] && fundAccount[ALSO_HELD_WITH[f]] === a && a !== 'Unassigned' && !jointAccount(a)));
     /** An adjustment's fund and the account it's in: "Savings@GoalSaver", or a plain fund in its own account. */
-    const fundAt = (v, date) => {
+    const fundAt = (v, date, tagged) => {
       const ref = fundRef(v);
+      ref.account = ref.account || tagged || '';
       if (!ref.fund) return { fund: '', account: '' };
       const ok = ref.account && fundAccount[ref.fund] && heldIn(ref.account).indexOf(ref.fund) >= 0;
       return { fund: ref.fund, account: ok ? ref.account : accountOn(ref.fund, date) || '' };
@@ -567,8 +578,9 @@ function TrackerEngine() {
     const adjustments = (data.adjustments || []).map(r => {
       if (!validDate(r.date)) { warn('An adjustment has no valid date and was skipped.'); return null; }
       if (!byCode[r.person]) { warn('An adjustment on ' + r.date + ' has unknown person "' + r.person + '" and was skipped.'); return null; }
-      const from = fundAt(r.fromFund, r.date);
-      const to = fundAt(r.toFund, r.date);
+      const tags = accountTags(r.note);
+      const from = fundAt(r.fromFund, r.date, tags.from);
+      const to = fundAt(r.toFund, r.date, tags.to);
       const fromFund = from.fund;
       const toFund = to.fund;
       if (!fromFund && !toFund) { warn('An adjustment on ' + r.date + ' has no fund and was skipped.'); return null; }
@@ -581,7 +593,7 @@ function TrackerEngine() {
         id: r.id, date: r.date, month: monthOf(r.date), person: r.person, fromFund, toFund, fromAccount, toAccount,
         type: fromFund && toFund ? 'Transfer' : toFund ? 'Add' : 'Deduct',
         betweenAccounts: !!(fromAccount && toAccount && fromAccount !== toAccount),
-        amount: round2(num(r.amount)), note: r.note || '',
+        amount: round2(num(r.amount)), note: tags.note,
       };
     }).filter(Boolean).sort(byDate);
 
@@ -1030,7 +1042,7 @@ function TrackerEngine() {
   }
 
   return {
-    compute, monthSummary, settingsOf, jointAccount, interestFundIn, fundRef, withhold, annualTax, autoScale, scaleFor, walletTransfer, walletMonth, WALLET_TYPES, FEE_CATEGORY,
+    compute, monthSummary, settingsOf, jointAccount, interestFundIn, fundRef, accountTags, tagNote, withhold, annualTax, autoScale, scaleFor, walletTransfer, walletMonth, WALLET_TYPES, FEE_CATEGORY,
     BILL_REPEATS, billsOf, billAud, billNext, billStatus, billExpense, billPaid, daysBetween,
     fyOf, fyMonths, fyName, normFy, monthOf, weekStart, addDays, addMonths, monthRange, todayISO,
     isBlank, num, pct, round2,
