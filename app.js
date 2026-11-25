@@ -31,10 +31,10 @@
   const RECOMMENDED_FUNDS = {
     'Living Expenses': ['#2A78D6', '🏠', 'Everyday Account'], 'Savings': ['#1BAF7A', '🐷', 'Self Saving'],
     'Tuition Fund': ['#EDA100', '🎓', 'Shared Saving'], 'Family': ['#E87BA4', '👨‍👩‍👧', 'Self Saving'],
-    'GPGZ': ['#008300', '✨', 'Shared Saving'], 'Shopping/Travel': ['#0891B2', '✈️', 'Self Saving'], 'Emergency Fund': ['#A16207', '🛟', 'Self Saving'],
+    'GPGZ': ['#008300', '✨', 'Shared Saving'], 'Shopping/Travel': ['#0891B2', '✈️', 'Self Saving'], 'Emergency Fund': ['#A16207', '🛟', 'GoalSaver'],
   };
   // Bank accounts: icon + colour (colour-blind-safe order, same as the first fund colours).
-  const ACCOUNT_STYLE = { 'Everyday Account': ['💳', '#2A78D6'], 'Self Saving': ['🏦', '#1BAF7A'], 'Shared Saving': ['🤝', '#EDA100'] };
+  const ACCOUNT_STYLE = { 'Everyday Account': ['💳', '#2A78D6'], 'Self Saving': ['🏦', '#1BAF7A'], 'Shared Saving': ['🤝', '#EDA100'], 'GoalSaver': ['🛟', '#A16207'] };
   const ACCOUNT_COLOURS = ['#2A78D6', '#1BAF7A', '#EDA100', '#E87BA4', '#008300'];
   // Wallet page: [country, currency, flag, name], and quick picks [name, card colour, badge, logo in assets/logos].
   const WALLET_PLACES = [['AU', 'AUD', '🇦🇺', 'Australia'], ['MY', 'MYR', '🇲🇾', 'Malaysia']];
@@ -273,7 +273,7 @@
     const M = state.M;
     const warnings = M.warnings.length
       ? `<div class="notice"><strong>⚠️ Check your settings</strong><ul>${M.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>` : '';
-    $view.innerHTML = warnings + accountFixNotice() + v[3]();
+    $view.innerHTML = warnings + accountFixNotice() + goalSaverNotice() + v[3]();
     const hooks = state.after;
     state.after = [];
     hooks.forEach(fn => fn());
@@ -289,8 +289,17 @@
   function accountFixNotice() {
     if (!needsAccountFix() || ['dashboard', 'accounts', 'balances', 'me'].indexOf(state.view) < 0) return '';
     return `<section class="card" style="border:2px solid var(--brand-deep)"><div class="row" style="flex-wrap:nowrap;align-items:flex-start">${tile('🏦', 'var(--brand-deep)')}
-      <div style="flex:1"><strong>Set up your three accounts</strong><div class="muted small">Your funds still use the old “Self Account / Shared Account”. Switch to 💳 Everyday Account (Living Expenses), 🏦 Self Saving (Savings, Family, Shopping/Travel, Emergency) and 🤝 Shared Saving (Tuition, GPGZ)?</div>
+      <div style="flex:1"><strong>Set up your three accounts</strong><div class="muted small">Your funds still use the old “Self Account / Shared Account”. Switch to 💳 Everyday Account (Living Expenses), 🏦 Self Saving (Savings, Family, Shopping/Travel), 🛟 GoalSaver (Emergency) and 🤝 Shared Saving (Tuition, GPGZ)?</div>
       <button class="btn primary" data-act="fix-accounts" style="margin-top:10px">Switch now</button></div></div></section>`;
+  }
+
+  /** Emergency Fund moved to the GoalSaver account: shown until Settings → Funds says so. */
+  function goalSaverNotice() {
+    const f = fundOf('Emergency Fund');
+    if (!f || f.account === 'GoalSaver' || needsAccountFix() || ['dashboard', 'accounts', 'balances', 'me'].indexOf(state.view) < 0) return '';
+    return `<section class="card" style="border:2px solid var(--brand-deep)"><div class="row" style="flex-wrap:nowrap;align-items:flex-start">${tile('🛟', '#A16207')}
+      <div style="flex:1"><strong>Emergency Fund → GoalSaver</strong><div class="muted small">From 25 Nov 2026, the Emergency part of each pay goes to 🛟 GoalSaver. Emergency money saved before then stays in ${esc(f.account)}. Other funds don’t change.</div>
+      <button class="btn primary" data-act="goal-saver" style="margin-top:10px">Use GoalSaver</button></div></div></section>`;
   }
 
   function monthNav() {
@@ -1832,7 +1841,7 @@
     const hour = h => (h % 12 || 12) + (h < 12 ? ' am' : ' pm');
     const what = `<ul class="small" style="padding-left:20px;margin:0 0 10px;display:grid;gap:3px">
         <li><strong>Tuesday ${hour(sch.payHour)}</strong>: did you get paid? Tap to record it (your usual days are filled in).</li>
-        <li><strong>Daily ${hour(sch.remindHour)}</strong>: pay still to move to Self Saving / Shared Saving, until you tap ✅ Done.</li>
+        <li><strong>Daily ${hour(sch.remindHour)}</strong>: pay still to move to your savings accounts, until you tap ✅ Done.</li>
         <li><strong>1st of the month, ${hour(sch.interestHour)}</strong>: record last month’s bank interest.</li>
         <li><strong>Bills &amp; subscriptions</strong>: before each one is due, at the time you chose in the bill. Tap to pay and record it.</li>
         <li><strong>Settle up</strong>: as soon as the other person adds a bill they paid, on Tuesdays, and when they tap <strong>Remind</strong>.</li></ul>`;
@@ -3988,7 +3997,10 @@
         const r = RECOMMENDED_FUNDS[String(f.name).trim()];
         return r ? Object.assign({}, f, { account: r[2], icon: f.icon || r[1] }) : f;
       });
-      saveSettings({ funds: rows }, el, '✓ Accounts set: Everyday Account, Self Saving, Shared Saving');
+      saveSettings({ funds: rows }, el, '✓ Accounts set: Everyday Account, Self Saving, GoalSaver, Shared Saving');
+    } else if (act === 'goal-saver') {
+      const rows = state.app.data.settings.funds.map(f => (String(f.name).trim() === 'Emergency Fund' ? Object.assign({}, f, { account: 'GoalSaver' }) : f));
+      saveSettings({ funds: rows }, el, '✓ Emergency Fund now goes to GoalSaver');
     }
     else if (act === 'person') {
       state.person = key;

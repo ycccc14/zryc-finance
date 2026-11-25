@@ -63,6 +63,13 @@ function TrackerEngine() {
     return n > 1 ? n / 100 : n;
   }
 
+  /**
+   * Funds that moved to another bank account: records dated before `before` stay in the old account, so
+   * money already saved there stays there and only new pay goes to the fund's account in Settings.
+   * Emergency Fund: GoalSaver from 25 Nov 2026 (it was in Self Saving).
+   */
+  const ACCOUNT_MOVES = { 'Emergency Fund': [{ before: '2026-11-25', account: 'Self Saving' }] };
+
   /** A bank account both of you own (Shared Saving, or any account with "Shared" in its name). */
   const jointAccount = name => /shared/i.test(String(name || ''));
 
@@ -431,6 +438,13 @@ function TrackerEngine() {
     const fundNames = S.funds.map(f => f.name);
     const fundAccount = {};
     S.funds.forEach(f => { fundAccount[f.name] = f.account; });
+    /** The bank account a fund's money was in on `date` (see ACCOUNT_MOVES). */
+    const accountOn = (f, date) => {
+      const now = fundAccount[f];
+      if (!now || now === 'Unassigned') return now;
+      const past = (ACCOUNT_MOVES[f] || []).filter(m => m.account !== now && date < m.before).sort((x, y) => (x.before < y.before ? -1 : 1))[0];
+      return past ? past.account : now;
+    };
     const catFund = {};
     S.categories.forEach(c => { catFund[c.name] = c.fund; });
 
@@ -532,8 +546,8 @@ function TrackerEngine() {
       [fromFund, toFund].forEach(f => {
         if (f && fundNames.indexOf(f) < 0) warn('An adjustment on ' + r.date + ' uses unknown fund "' + f + '".');
       });
-      const fromAccount = fundAccount[fromFund] || '';
-      const toAccount = fundAccount[toFund] || '';
+      const fromAccount = (fromFund && accountOn(fromFund, r.date)) || '';
+      const toAccount = (toFund && accountOn(toFund, r.date)) || '';
       return {
         id: r.id, date: r.date, month: monthOf(r.date), person: r.person, fromFund, toFund, fromAccount, toAccount,
         type: fromFund && toFund ? 'Transfer' : toFund ? 'Add' : 'Deduct',
@@ -549,7 +563,7 @@ function TrackerEngine() {
       const wallet = walletPart(r, amount); // paid into a Wallet account (e.g. in Malaysia): no fund gets it
       const saved = String(r.fund || '').trim();
       if (!wallet && !fundAccount[saved]) { warn('Interest on ' + r.date + ' uses unknown fund "' + saved + '" and was skipped.'); return null; }
-      const fund = wallet ? '' : interestFundIn(fundAccount[saved], S.funds); // whatever fund was picked, the account's interest fund gets it
+      const fund = wallet ? '' : interestFundIn(accountOn(saved, r.date), S.funds.map(f => ({ name: f.name, account: accountOn(f.name, r.date) }))); // whatever fund was picked, the account's interest fund gets it
       const shares = {};
       if (r.person === SHARED && codes.length >= 2) {
         shares[codes[0]] = round2(amount * S.general.sharedSplit);
@@ -562,7 +576,7 @@ function TrackerEngine() {
       }
       return {
         id: r.id, date: r.date, month: monthOf(r.date), fy: fyOf(r.date), person: r.person,
-        fund, account: wallet ? '' : fundAccount[fund], wallet, amount, shares, note: r.note || '',
+        fund, account: wallet ? '' : accountOn(fund, r.date), wallet, amount, shares, note: r.note || '',
       };
     }).filter(Boolean).sort(byDate);
 
@@ -693,7 +707,9 @@ function TrackerEngine() {
     // --- bank accounts since the start date ---
     // Each account holds the funds mapped to it, so its balance always equals the sum of
     // those funds' balances. Moves between funds in the same account don't touch the account.
-    const accountNames = S.funds.map(f => f.account).filter((a, i, arr) => arr.indexOf(a) === i);
+    const accountNames = S.funds.map(f => f.account)
+      .concat(...S.funds.map(f => (ACCOUNT_MOVES[f.name] || []).filter(m => m.account !== f.account && fundAccount[f.name] !== 'Unassigned').map(m => m.account)))
+      .filter((a, i, arr) => arr.indexOf(a) === i);
     const FLOWS = ['allocated', 'interest', 'spent', 'transferIn', 'transferOut', 'added', 'deducted'];
     const ledgers = {};
     keys.forEach(k => {
@@ -716,11 +732,11 @@ function TrackerEngine() {
     };
     income.forEach(r => {
       if (r.date < start) return;
-      [r.person, ALL].forEach(k => fundNames.forEach(f => bump(k, fundAccount[f], r.month, 'allocated', r.alloc[f])));
+      [r.person, ALL].forEach(k => fundNames.forEach(f => bump(k, accountOn(f, r.date), r.month, 'allocated', r.alloc[f])));
     });
     expenses.forEach(r => {
       if (r.date < start || !fundAccount[r.fund]) return;
-      Object.keys(r.shares).forEach(c => [c, ALL].forEach(k => bump(k, fundAccount[r.fund], r.month, 'spent', r.shares[c])));
+      Object.keys(r.shares).forEach(c => [c, ALL].forEach(k => bump(k, accountOn(r.fund, r.date), r.month, 'spent', r.shares[c])));
     });
     adjustments.forEach(r => {
       if (r.date < start || (r.fromAccount && r.fromAccount === r.toAccount)) return;
@@ -750,6 +766,12 @@ function TrackerEngine() {
       L.balance = L.in - L.out;
       L.balanceMYR = L.balance * S.general.exchangeRate;
     }));
+    // A fund that moved account (ACCOUNT_MOVES) has money in both, so account totals come from the ledgers.
+    keys.forEach(k => {
+      const byAccount = {};
+      accountNames.forEach(a => { if (ledgers[k][a].funds.length || Math.abs(ledgers[k][a].balance) > 0.004) byAccount[a] = ledgers[k][a].balance; });
+      balances[k].byAccount = byAccount;
+    });
 
     // --- wallet: the real money in each account, in that account's own currency ---
     // `data.viewer` is whoever's device this is: the server only sends that person's accounts and shared ones.
@@ -798,14 +820,14 @@ function TrackerEngine() {
     /** A bank account's records: everything that makes up its Accounts page balance, for that person (or both, if shared). */
     function ledgerEvents(w) {
       const k = w.owner === SHARED ? ALL : w.owner;
-      const here = f => fundAccount[f] === w.linked;
+      const here = (f, date) => accountOn(f, date) === w.linked;
       const events = [];
       const add = (kind, r, title, note, change) => { if (Math.abs(change) >= 0.005) events.push({ kind, id: r.id, date: r.date, month: r.month, title, note, change }); };
-      income.filter(r => r.date >= start && (k === ALL || r.person === k)).forEach(r => add('income', r, r.hours ? 'Pay' : 'Other income', r.note, sum(fundNames.filter(here).map(f => r.alloc[f]))));
-      expenses.filter(r => r.date >= start && here(r.fund)).forEach(r => add('expenses', r, r.description || r.category, r.description ? r.category : '', -(k === ALL ? r.amount : r.shares[k] || 0)));
+      income.filter(r => r.date >= start && (k === ALL || r.person === k)).forEach(r => add('income', r, r.hours ? 'Pay' : 'Other income', r.note, sum(fundNames.filter(f => here(f, r.date)).map(f => r.alloc[f]))));
+      expenses.filter(r => r.date >= start && here(r.fund, r.date)).forEach(r => add('expenses', r, r.description || r.category, r.description ? r.category : '', -(k === ALL ? r.amount : r.shares[k] || 0)));
       adjustments.filter(r => r.date >= start && (k === ALL || r.person === k) && r.fromAccount !== r.toAccount).forEach(r =>
         add('adjustments', r, r.note || 'Transfer', '', (r.toAccount === w.linked ? r.amount : 0) - (r.fromAccount === w.linked ? r.amount : 0)));
-      interest.filter(r => r.date >= start && here(r.fund)).forEach(r => add('interest', r, 'Interest', r.note, k === ALL ? r.amount : r.shares[k] || 0));
+      interest.filter(r => r.date >= start && r.account === w.linked).forEach(r => add('interest', r, 'Interest', r.note, k === ALL ? r.amount : r.shares[k] || 0));
       let running = 0;
       // Fund shares aren't whole cents, so only round for showing: the last line must match the account's balance.
       events.sort(byDate).forEach(e => {
