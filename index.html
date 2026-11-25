@@ -511,22 +511,21 @@
   .quick button { border: 0; background: none; display: grid; justify-items: center; gap: 6px; cursor: pointer; font-size: 13px; font-weight: 650; color: var(--ink-2); padding: 4px 0; }
   .quick .q { width: 50px; height: 50px; border-radius: 16px; display: grid; place-items: center; font-size: 24px;
     background: var(--soft); background: color-mix(in srgb, var(--c, var(--brand)) 18%, var(--card)); }
-  /* Home ▸ Accounts: total on top, then 2 cards per row on a phone (an odd last card spans the row). */
-  .acct-board { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 12px; box-shadow: var(--shadow); display: grid; gap: 10px; }
-  .acct-total { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 2px 4px 0; }
-  .acct-total strong { font-size: 20px; font-weight: 800; letter-spacing: -.01em; }
-  .acct-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .acct-strip > .acct-mini:last-child:nth-child(odd) { grid-column: 1 / -1; }
-  @media (min-width: 700px) { .acct-strip { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); } .acct-strip > .acct-mini:last-child:nth-child(odd) { grid-column: auto; } }
-  .acct-mini { background: var(--soft); border-radius: 16px; padding: 12px; cursor: pointer; min-width: 0; display: grid; gap: 4px; align-content: start; }
-  .acct-mini:active { background: var(--line); }
-  .acct-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
-  .acct-share { font-size: 12px; font-weight: 700; color: var(--muted); }
-  .acct-mini .k { font-size: 13px; color: var(--muted); font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .acct-mini .v { font-size: 20px; font-weight: 800; letter-spacing: -.01em; white-space: nowrap; }
-  .acct-bar { height: 4px; border-radius: 99px; background: var(--line); overflow: hidden; margin-top: 2px; }
-  .acct-bar span { display: block; height: 100%; border-radius: inherit; background: var(--c); }
-  .acct-funds { font-size: 11px; color: var(--muted); line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Accounts overview (Home, and the Accounts page hero): up to 4 small tiles in a row with short names. */
+  .acct-board { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 12px; box-shadow: var(--shadow); display: grid; gap: 10px; cursor: pointer; }
+  .acct-board:active { background: var(--soft); }
+  .acct-total { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 0 4px; font-size: 13px; color: var(--muted); font-weight: 650; }
+  .acct-total strong { font-size: 20px; font-weight: 800; letter-spacing: -.01em; color: var(--ink); }
+  .acct-total strong.neg { color: var(--bad); }
+  .acct-row { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 6px; }
+  .acct-chip { background: var(--soft); border-radius: 12px; padding: 8px 6px; min-width: 0; display: grid; gap: 2px; text-align: center; container-type: inline-size; }
+  .hero .acct-row { margin-top: 18px; }
+  .hero .acct-chip { background: rgba(255, 255, 255, .45); }
+  @media (prefers-color-scheme: dark) { .hero .acct-chip { background: rgba(255, 255, 255, .08); } }
+  .acct-chip .k { font-size: clamp(10px, 15cqi, 12px); font-weight: 650; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hero .acct-chip .k { color: inherit; opacity: .8; }
+  .acct-chip .i { font-size: 18px; line-height: 1.2; }
+  .acct-chip .v { font-size: clamp(10px, 15cqi, 15px); font-weight: 800; white-space: nowrap; letter-spacing: -.01em; }
   .list-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 4px 2px -6px; }
   .list-head h2 { display: flex; align-items: center; gap: 6px; }
   /* Home "September activity" + All/ZR/YC/Shared stay on one row: the title gives way first. */
@@ -632,7 +631,6 @@
   .hero .big { font-size: clamp(24px, 11cqi, 38px); }
   .sum-big { font-size: clamp(22px, 9cqi, 32px); }
   .stat .v, .hero-stat .v, .acct-mini .v, .kpi4 .v, .fund .bal, .hero .big, .sum-big, .sum-mid, .ring .v, .donut-center .v { overflow-wrap: anywhere; white-space: normal; }
-  .acct-mini .v { font-size: clamp(15px, 13cqi, 22px); white-space: nowrap; overflow-wrap: normal; }
   .stat, .kv > span, .receipt .line > span, .tx-amt, .rank > * { min-width: 0; }
   .kv > span:first-child, .receipt .line > span:first-child { overflow-wrap: anywhere; }
   /* No connection: a line in the header under the tabs. */
@@ -790,8 +788,8 @@
   <div id="lock" class="lock" hidden></div>
   <div id="pair" hidden></div>
   <script src="vendor/chart.umd.js"></script>
-  <script src="engine.js?v=cb941aae73"></script>
-  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = 'cb941aae73';</script>
-  <script src="boot.js?v=cb941aae73"></script>
+  <script src="engine.js?v=74ce19fddf"></script>
+  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = '74ce19fddf';</script>
+  <script src="boot.js?v=74ce19fddf"></script>
 </body>
 </html>

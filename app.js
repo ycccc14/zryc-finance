@@ -214,6 +214,13 @@
   const tile = (emoji, colour, cls) => `<span class="ico${cls ? ' ' + cls : ''}" style="--c:${colour}" aria-hidden="true">${esc(emoji)}</span>`;
   const aIcon = name => (ACCOUNT_STYLE[name] || ['🏦'])[0];
   const aColour = name => (ACCOUNT_STYLE[name] || [])[1] || ACCOUNT_COLOURS[Math.max(0, state.M.accounts.indexOf(name)) % ACCOUNT_COLOURS.length];
+  /** Short account name for small tiles: Everyday Account → Everyday, Self Saving → Self, GoalSaver → Goal. */
+  const aShort = name => String(name).replace(/\s*(account|savings?)$/i, '').replace(/(.)saver$/i, '$1') || String(name);
+  /** Accounts side by side (up to 4 in a row): icon and short name, then the balance. */
+  const acctRow = (names, balOf) => `<div class="acct-row" style="--n:${Math.min(4, names.length) || 1}">${names.map(a => {
+    const bal = balOf(a);
+    return `<div class="acct-chip" title="${esc(a)}"><span class="i" aria-hidden="true">${esc(aIcon(a))}</span><span class="k">${esc(aShort(a))}</span><span class="v${neg(bal)}">${money(bal)}</span></div>`;
+  }).join('')}</div>`;
   const fundsIn = account => state.M.fundNames.filter(f => fundOf(f).account === account);
   /** Accounts that earn interest: all except the everyday spending account. */
   const interestAccounts = () => {
@@ -594,22 +601,12 @@
         <div><span class="k">${isNow ? 'Saved so far' : 'Saved'}</span><span class="v${left < -0.004 ? ' neg' : ''}">${money(left)}</span></div></div>
     </section>`;
 
-    // Accounts: 2 per row on a phone (an odd last one spans the row), each with its share of the total and its funds.
+    // Accounts: a small overview, all in one row, with short names (Everyday, Self, Shared, Goal).
     const acctTotal = sumOf(M.accounts, a => L[a].balance);
     const accts = `<div class="list-head"><h2>🏦 Accounts</h2><button class="btn link" data-act="view" data-key="accounts">See all ${ico('arrow', 16)}</button></div>
-      <section class="acct-board">
-        <div class="acct-total"><span class="muted small">Total in ${M.accounts.length} account${M.accounts.length === 1 ? '' : 's'}</span><strong class="${neg(acctTotal).trim()}">${money(acctTotal)}</strong></div>
-        <div class="acct-strip">${M.accounts.map(a => {
-          const bal = L[a].balance;
-          const share = !masked() && acctTotal > 0.004 && bal > 0 ? bal / acctTotal : 0; // hidden amounts: no share either
-          const funds = fundsIn(a);
-          return `<div class="acct-mini" role="button" tabindex="0" data-act="view" data-key="accounts" style="--c:${aColour(a)}">
-          <div class="acct-top">${tile(aIcon(a), aColour(a), 'sm')}<span class="acct-share">${share ? pctf(share, share < 0.01 ? 1 : 0) : ''}</span></div>
-          <div class="k">${esc(a)}</div>
-          <div class="v${neg(bal)}">${money(bal)}</div>
-          <div class="acct-bar" aria-hidden="true"><span style="width:${(share * 100).toFixed(1)}%"></span></div>
-          <div class="acct-funds">${funds.length ? funds.map(f => esc(fIcon(f)) + ' ' + esc(f)).join(' · ') : '&nbsp;'}</div></div>`;
-        }).join('')}</div></section>`;
+      <section class="acct-board" role="button" tabindex="0" data-act="view" data-key="accounts">
+        <div class="acct-total"><span>Total</span><strong class="${neg(acctTotal).trim()}">${money(acctTotal)}</strong></div>
+        ${acctRow(M.accounts, a => L[a].balance)}</section>`;
 
     const tabs = [['All', 'All']].concat(M.codes.map(c => [c, pName(c)]), [['Shared', 'Shared']]);
     const bills = `<div class="list-head act-head"><h2>💛 <span id="bills-title">${state.q ? 'Search results' : monthLong(m) + ' activity'}</span></h2>
@@ -1143,11 +1140,10 @@
     const months = L[accts[0]] ? Object.keys(L[accts[0]].months).sort() : [];
 
     const hero = `<section class="hero">
-      <div class="label">${M.accounts.map(esc).join(', ')} · ${sel === 'All' ? 'both of you' : esc(pName(sel))}</div>
+      <div class="label">${accts.length} account${accts.length === 1 ? '' : 's'} · ${sel === 'All' ? 'both of you' : esc(pName(sel))}</div>
       <div class="big${neg(total)}">${money(total)}</div>
       <div class="myr">≈ ${myr(total * M.general.exchangeRate)} · since opening on ${fmtDate(M.general.startDate)}</div>
-      <div class="hero-stats" style="grid-template-columns:repeat(${Math.min(3, accts.length)}, minmax(0, 1fr))">${accts.map(a =>
-        `<div class="hero-stat"><div class="k">${esc(aIcon(a))} ${esc(a)}</div><div class="v">${money(L[a].balance)}</div></div>`).join('')}</div></section>`;
+      ${acctRow(accts, a => L[a].balance)}</section>`;
 
     const cards = accts.map(a => {
       const A = L[a];
@@ -1508,8 +1504,7 @@
       <div class="label">${sel === 'All' ? 'Bank interest we earned' : esc(pName(sel)) + '’s bank interest'} · ${fyName(fy)}</div>
       <div class="big">${money(fyTotal)}</div>
       <div class="myr">≈ ${myr(fyTotal * M.general.exchangeRate)} · all time ${money(allTotal)}</div>
-      <div class="hero-stats" style="grid-template-columns:repeat(${Math.min(3, accts.length)}, minmax(0, 1fr))">${accts.map(a =>
-        `<div class="hero-stat"><div class="k">${esc(aIcon(a))} ${esc(a)}</div><div class="v">${money(sumOf(inFy.filter(r => interestAcct(r) === a), share))}</div></div>`).join('')}</div></section>`;
+      ${acctRow(accts, a => sumOf(inFy.filter(r => interestAcct(r) === a), share))}</section>`;
     const chips = `<div class="spread"><div class="scroller" style="margin:0;padding:2px 0">${years.map(y =>
       `<button class="filter-chip" data-act="fy" data-key="${y}" aria-pressed="${y === fy}" style="padding-left:12px">${fyName(y)}</button>`).join('')}</div>${addBtn('interest', 'Record')}</div>`;
 
