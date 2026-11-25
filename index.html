@@ -661,6 +661,14 @@
   /* Installed iPhone app (standalone): keep the header clear of the status bar / Dynamic Island. */
   .band { padding-top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 960px) { .band { padding-top: calc(18px + env(safe-area-inset-top)); } }
+  /* Phone: the top row (Both / ZR / YC, search, 👁, refresh) stays on screen while scrolling. The band keeps its
+     room (44px row + 12px gap), and the row gets the band's colour once the page scrolls under it. */
+  @media (max-width: 959px) {
+    .band { padding-top: calc(12px + env(safe-area-inset-top) + 56px); }
+    .band-row { position: fixed; top: 0; left: 0; right: 0; z-index: 40; padding: calc(12px + env(safe-area-inset-top)) 16px 8px;
+      transition: background-color .15s ease, box-shadow .15s ease; }
+    .scrolled .band-row { background: var(--band); box-shadow: 0 4px 14px rgba(60, 50, 10, .12); border-radius: 0 0 20px 20px; }
+  }
   /* Older iOS (before 14.5) has no "inset": spell it out. */
   .modal { top: 0; right: 0; bottom: 0; left: 0; }
   /* Calculator keypad for amounts. */
@@ -788,8 +796,8 @@
   <div id="lock" class="lock" hidden></div>
   <div id="pair" hidden></div>
   <script src="vendor/chart.umd.js"></script>
-  <script src="engine.js?v=74ce19fddf"></script>
-  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = '74ce19fddf';</script>
-  <script src="boot.js?v=74ce19fddf"></script>
+  <script src="engine.js?v=7a6f73e177"></script>
+  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = '7a6f73e177';</script>
+  <script src="boot.js?v=7a6f73e177"></script>
 </body>
 </html>

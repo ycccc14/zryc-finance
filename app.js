@@ -3634,6 +3634,10 @@
   window.addEventListener('focus', backOnScreen);
   window.addEventListener('pageshow', backOnScreen);
   window.addEventListener('online', () => { netFails = 0; showNet(); checkForUpdates(); });
+  // Phone header: the fixed top row gets a background once the page scrolls under it.
+  const markScrolled = () => document.documentElement.classList.toggle('scrolled', window.scrollY > 4);
+  window.addEventListener('scroll', markScrolled, { passive: true });
+  markScrolled();
   // Typing in the page (not the pop-up form) holds back background redraws until it's saved or left.
   document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#view')) state.viewEdited = true; }, true);
 
