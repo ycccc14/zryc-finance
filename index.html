@@ -624,6 +624,21 @@
   .stat .v, .hero-stat .v, .acct-mini .v, .kpi4 .v, .fund .bal, .hero .big, .sum-big, .sum-mid, .ring .v, .donut-center .v { overflow-wrap: anywhere; white-space: normal; }
   .stat, .kv > span, .receipt .line > span, .tx-amt, .rank > * { min-width: 0; }
   .kv > span:first-child, .receipt .line > span:first-child { overflow-wrap: anywhere; }
+  /* No connection: a line in the header under the tabs. */
+  .net-note { background: var(--card); color: var(--ink); border-radius: 14px; padding: 9px 12px; font-size: 13px; line-height: 1.4;
+    box-shadow: 0 1px 4px rgba(60, 50, 10, .15); border-left: 4px solid var(--warn); }
+  .kv > span.num:last-child { flex-shrink: 0; } /* the amount keeps its width; the label wraps instead */
+  .kpi4 .tag { white-space: normal; max-width: 100%; } /* "▼ 12.0% vs Oct 1–25" wraps in a narrow tile */
+  /* 320px screens (iPhone SE, or any iPhone with Display Zoom): month arrows and header tabs give a little room. */
+  @media (max-width: 359px) {
+    .month-nav button { width: 34px; }
+    .mn-pill { padding: 6px 4px; }
+    .band-tabs button { padding: 8px 2px; font-size: 13px; }
+  }
+  @media (max-width: 374px) {
+    .seg.kinds { min-width: 0; }
+    .seg.kinds .k-ico { display: none; } /* Income / Expense / Adjust / Interest, without their icons, so Close stays on screen */
+  }
   /* Header row: the search box gives way first, then the wallet name shortens. */
   .band-inner { grid-template-columns: minmax(0, 1fr); }
   .band-row, .band-tools, .search { min-width: 0; }
@@ -764,8 +779,8 @@
   <div id="lock" class="lock" hidden></div>
   <div id="pair" hidden></div>
   <script src="vendor/chart.umd.js"></script>
-  <script src="engine.js?v=22b1b2e2d8"></script>
-  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = '22b1b2e2d8';</script>
-  <script src="boot.js?v=22b1b2e2d8"></script>
+  <script src="engine.js?v=bdc47a5425"></script>
+  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = 'bdc47a5425';</script>
+  <script src="boot.js?v=bdc47a5425"></script>
 </body>
 </html>
