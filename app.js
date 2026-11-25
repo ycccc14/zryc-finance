@@ -636,13 +636,13 @@
       <div class="mini-tabs" role="group" aria-label="Whose activity">${tabs.map(([k, l]) => `<button type="button" data-act="bill-tab" data-key="${esc(k)}" aria-pressed="${state.billTab === k}">${esc(l)}</button>`).join('')}</div></div>
       <div id="bills" style="display:grid;gap:12px">${billsHtml()}</div>`;
 
-    return summary + payCheckCard() + billsDueCard() + interestCard() + transferCard() + debtCard() + accts + bills;
+    return summary + payCheckCard() + tdDueCard() + billsDueCard() + interestCard() + transferCard() + debtCard() + accts + bills;
   }
 
   // ---------- bills & subscriptions ----------
 
   /** Bills for the wallet shown at the top: that person's, ones they pay, and shared ones. */
-  const billsFor = sel => state.M.bills.filter(b => sel === 'All' || b.person === sel || b.person === 'Shared' || b.paidBy === sel);
+  const billsFor = sel => state.M.bills.filter(b => !isTdBill(b) && (sel === 'All' || b.person === sel || b.person === 'Shared' || b.paidBy === sel));
   const billWhen = b => {
     const st = E.billStatus(b, state.M.today);
     return st.key === 'overdue' ? `<span class="tag bad">Overdue ${-st.days} day${st.days === -1 ? '' : 's'}</span>`
@@ -701,8 +701,122 @@
     return hero + (active.length ? cards : `<section class="card">${empty('🎉', 'All paid.')}</section>`) + finished + tip;
   }
 
+  // ---------- term deposits ----------
+  // A term deposit is a Wallet account with its details in the note (see E.tdOf). Its two reminders are
+  // bills the server already notifies about: "B-td-<account>-soon" a few days before it matures and
+  // "B-td-<account>-due" on the day. They're left off the Bills page; tapping one records the interest.
+
+  const isTdBill = b => /^B-td-/.test(String(b && b.id !== undefined ? b.id : b));
+  const tdBillIds = wid => ['B-td-' + wid + '-soon', 'B-td-' + wid + '-due'];
+  const tdWalletOf = billId => wOf(String(billId).replace(/^B-td-/, '').replace(/-(soon|due)$/, ''));
+  const rawBill = id => (state.app.data.bills || []).find(r => String(r.id) === String(id));
+  /** This term's interest is recorded (its maturity reminder is finished). */
+  const tdDone = w => { const b = billOf(tdBillIds(w.id)[1]); return !!(b && b.done && b.date === w.td.maturity); };
+  /** Interest expected for the term, in the account's currency (0 without a rate). */
+  const tdExpected = w => E.tdInterest(w.shown, w.td);
+  const tdWhen = td => {
+    const left = E.daysBetween(state.M.today, td.maturity);
+    return left > 1 ? 'in ' + left + ' days' : left === 1 ? 'tomorrow' : left === 0 ? 'today' : left === -1 ? 'yesterday' : -left + ' days ago';
+  };
+
+  /** The term deposit typed into the account form ({ placed, term, unit, rate, remind, maturity, days }), or null. */
+  function tdForm(r) {
+    if (r.tdOn !== 'Yes' || !/^\d{4}-\d{2}-\d{2}$/.test(r.tdPlaced || '') || !(Math.floor(Number(r.tdTerm)) > 0)) return null;
+    return E.tdOf(E.tdNote('', { placed: r.tdPlaced, term: Math.floor(Number(r.tdTerm)), unit: r.tdUnit === 'd' ? 'd' : 'm', rate: Number(r.tdRate) || 0, remind: Number(r.tdRemind) || 0 })).td;
+  }
+
+  /** The reminder bills for a term deposit (or removing them, when it's no longer one or is closed). */
+  function tdBillItems(wid, name, owner, td, closed) {
+    const [soonId, dueId] = tdBillIds(wid);
+    const gone = ids => ids.filter(rawBill).map(id => ({ kind: 'bills', remove: id }));
+    if (!td || closed) return gone([soonId, dueId]);
+    const person = owner && owner !== 'Shared' ? owner : 'Shared';
+    const cats = (state.app.data.settings.categories || []).map(c => String(c.name || '').trim()).filter(Boolean);
+    const category = cats.find(c => /interest|saving/i.test(c)) || cats.find(c => /^other/i.test(c)) || cats[0] || '';
+    const bill = (id, date, title) => {
+      const was = rawBill(id);
+      const same = was && was.date === date;
+      return { kind: 'bills', record: { id, title, date, day: +date.slice(8, 10), amount: 0, person, paidBy: person === 'Shared' ? '' : person, category, splitPct: '',
+        repeat: 'none', before: 0, hour: 9, auto: '', done: same && was.done === 'Yes' ? 'Yes' : '', lastPaid: same ? was.lastPaid || '' : '', note: 'Term deposit reminder', currency: '', fxAmount: '', fxRate: '' } };
+    };
+    const items = [bill(dueId, td.maturity, `🐷 ${name} matures today · record the interest`)];
+    const soon = E.addDays(td.maturity, -td.remind);
+    if (td.remind > 0 && soon >= state.M.today) items.unshift(bill(soonId, soon, `🐷 ${name} matures in ${td.remind} day${td.remind === 1 ? '' : 's'} (${fmtDate(td.maturity)})`));
+    else items.push(...gone([soonId]));
+    return items;
+  }
+
+  /** The interest form for a term deposit: into the deposit itself (change it to any account), filled in with the expected interest. */
+  function tdRecordInterest(w) {
+    if (!w || !w.td) { toast('That term deposit isn’t in your Wallet.', true); return; }
+    const owner = w.owner === 'Shared' ? '' : w.owner;
+    const exp = tdExpected(w);
+    const myrAcct = w.currency === 'MYR';
+    const rec = Object.assign(newRecord('interest', owner ? { person: owner } : null), {
+      walletId: w.id, currency: myrAcct ? 'MYR' : '', fxAmount: myrAcct && exp ? exp : '', fxRate: '', amount: !myrAcct && exp ? exp : '',
+      date: w.td.maturity <= state.M.today ? w.td.maturity : state.M.today, note: w.name + ' term deposit (' + E.tdTermText(w.td) + ')' });
+    if (!owner) rec.person = 'Shared';
+    openForm('interest', rec, { isNew: true, td: w.id });
+  }
+
+  /** Interest for a term deposit was saved: its reminders are done, and it can roll over for another term. */
+  function tdInterestSaved(payload, wid, reopen) {
+    const w = wOf(wid);
+    const rawW = (state.app.data.wallets || []).find(r => String(r.id) === String(wid));
+    const items = [{ kind: 'interest', record: payload }];
+    let rolled = false;
+    if (w && w.td && rawW) {
+      const next = E.tdOf(E.tdNote('', Object.assign({}, w.td, { placed: w.td.maturity }))).td;
+      if (confirm(`Interest saved.\n\nRoll ${w.name} over for another ${E.tdTermText(w.td)}? It would start on ${fmtDate(next.placed)} and mature on ${fmtDate(next.maturity)}.\n\nChoose Cancel if you’re taking the money out (then close the account or change it).`)) {
+        items.push({ kind: 'wallets', record: Object.assign({}, rawW, { note: E.tdNote(rawW.note, next) }) });
+        items.push(...tdBillItems(wid, w.name, w.owner, next, false));
+        rolled = next;
+      }
+    }
+    if (!rolled) {
+      tdBillIds(wid).forEach(id => {
+        const b = rawBill(id);
+        if (b && b.done !== 'Yes') items.push({ kind: 'bills', record: Object.assign({}, b, { done: 'Yes', lastPaid: payload.date }) });
+      });
+    }
+    persistBundle(items, rolled ? '✓ Interest added · rolled over to ' + fmtDate(rolled.maturity) : '✓ Interest added', reopen);
+  }
+
+  /** Home: term deposits maturing soon (inside their reminder) or matured, until the interest is recorded. */
+  function tdDueCard() {
+    const M = state.M;
+    const list = (M.wallets || []).filter(w => w.td && !w.closed && !tdDone(w) && E.daysBetween(M.today, w.td.maturity) <= Math.max(w.td.remind, 0)
+      && (state.person === 'All' || w.owner === state.person || w.owner === 'Shared'));
+    if (!list.length) return '';
+    return `<section class="card flush"><div class="card-head"><h2>🐷 Term deposits</h2></div><div class="tx-list">${list.map(w => {
+      const left = E.daysBetween(M.today, w.td.maturity);
+      const exp = tdExpected(w);
+      return `<div class="tx" role="button" tabindex="0" data-act="wallet-open" data-key="${esc(w.id)}">${tile('🗓️', '#64748B', 'round')}
+        <div class="tx-main"><span class="tx-title">${esc(w.name)}</span><span class="tx-sub"><span class="tag ${left < 0 ? 'bad' : 'warn'}">${left > 0 ? 'Matures ' + tdWhen(w.td) : left === 0 ? 'Matures today' : 'Matured ' + tdWhen(w.td)}</span> · ${dayLabel(w.td.maturity)}${exp ? ' · ≈ ' + wMoney(exp, w.currency) + ' interest' : ''}</span></div>
+        ${left <= 0 ? `<button type="button" class="btn primary sm" data-act="td-interest" data-key="${esc(w.id)}">Record interest</button>` : ''}</div>`;
+    }).join('')}</div></section>`;
+  }
+
+  /** Wallet ▸ a term deposit: its dates, rate and expected interest, and recording the interest. */
+  function tdPanel(w) {
+    if (!w.td || w.closed) return '';
+    const td = w.td;
+    const left = E.daysBetween(state.M.today, td.maturity);
+    const exp = tdExpected(w);
+    const done = tdDone(w);
+    const kv = (k, v) => `<div class="kv"><span class="muted">${k}</span><span>${v}</span></div>`;
+    return `<section class="card"><div class="card-head"><h2>🗓️ Term deposit</h2>${done ? '<span class="tag good">✓ Interest recorded</span>' : left <= 0 ? '<span class="tag bad">Matured</span>' : left <= td.remind ? '<span class="tag warn">Matures soon</span>' : ''}</div>
+      ${kv('Placed', dayLabel(td.placed))}${kv('Term', esc(E.tdTermText(td)) + ' · ' + td.days + ' days')}
+      ${kv('Matures', `<strong>${dayLabel(td.maturity)}</strong> · ${tdWhen(td)}`)}
+      ${td.rate ? kv('Interest rate', td.rate + '% a year') + kv('Expected interest', '≈ ' + wMoney(exp, w.currency)) : ''}
+      ${kv('Reminders', (td.remind ? td.remind + ' day' + (td.remind === 1 ? '' : 's') + ' before, and ' : '') + 'on the day')}
+      <div class="row" style="margin-top:12px">${done ? '' : `<button class="btn${left <= td.remind ? ' primary' : ''}" data-act="td-interest" data-key="${esc(w.id)}">🏦 Record interest</button>`}
+        <button class="btn" data-act="wallet-edit" data-key="${esc(w.id)}">✏️ Change term</button></div></section>`;
+  }
+
   /** The Pay form: an expense filled in from the bill. Saving it also moves the bill on. */
   function payBill(id) {
+    if (isTdBill(id)) { tdRecordInterest(tdWalletOf(id)); return; }
     const b = billOf(id);
     if (!b || b.done) return;
     const x = E.billExpense(b, state.M.today, state.M.general.exchangeRate);
@@ -1249,6 +1363,26 @@
     return (0.299 * (n >> 16 & 255) + 0.587 * (n >> 8 & 255) + 0.114 * (n & 255)) / 255 > 0.62 ? '#1A1A1A' : '#FFFFFF';
   }
 
+  /** Account form: a Savings & investments account can be a term deposit (placed on, term, rate, reminder). */
+  function tdFields(r) {
+    const on = r.tdOn === 'Yes';
+    const seg = `<div class="field"><span>Term deposit?</span><input type="hidden" name="tdOn" value="${on ? 'Yes' : ''}">
+      <div class="seg" role="group" aria-label="Term deposit">${[['', 'No'], ['Yes', '🗓️ Yes, it matures']].map(([v, l]) =>
+        `<button type="button" data-act="wallet-td" data-key="${v}" aria-pressed="${(on ? 'Yes' : '') === v}">${l}</button>`).join('')}</div></div>`;
+    if (!on) return seg;
+    const terms = ['1m', '3m', '6m', '12m', '90d'];
+    const now = Math.floor(Number(r.tdTerm)) + (r.tdUnit === 'd' ? 'd' : 'm');
+    return seg + `
+      <div class="two">${field('Placed on', 'tdPlaced', r.tdPlaced, 'type="date" required')}
+        <div class="field"><span>Term</span><div style="display:flex;gap:8px"><input name="tdTerm" value="${esc(r.tdTerm)}" type="number" min="1" step="1" inputmode="numeric" placeholder="6" style="flex:1;min-width:0">
+          <select name="tdUnit" style="flex:1;min-width:0"><option value="m"${r.tdUnit !== 'd' ? ' selected' : ''}>months</option><option value="d"${r.tdUnit === 'd' ? ' selected' : ''}>days</option></select></div></div></div>
+      <div class="scroller">${terms.map(t => `<button type="button" class="filter-chip" data-act="td-term" data-key="${t}" aria-pressed="${now === t}">${parseInt(t, 10)} ${t.slice(-1) === 'd' ? 'days' : parseInt(t, 10) === 1 ? 'month' : 'months'}</button>`).join('')}</div>
+      <div class="two">${field('Interest rate (% a year)', 'tdRate', r.tdRate, 'type="number" step="0.01" min="0" inputmode="decimal" placeholder="Optional, e.g. 4.5"')}
+        <label class="field"><span>Remind me</span><select name="tdRemind">${[[1, '1 day before'], [2, '2 days before'], [3, '3 days before'], [5, '5 days before'], [7, '1 week before'], [14, '2 weeks before']]
+          .map(([d, l]) => `<option value="${d}"${Number(r.tdRemind) === d ? ' selected' : ''}>${l}</option>`).join('')}</select></label></div>
+      <p class="muted small" style="margin:0">You’re also reminded on the day it matures, to record the interest and choose which account it went into.</p>`;
+  }
+
   function walletCard(w, preview) {
     const c = w.colour || WALLET_COLOUR;
     const t = E.WALLET_TYPES[w.type];
@@ -1256,7 +1390,7 @@
     const logo = wLogo(w);
     return `<div class="wcard" style="--c:${esc(c)};--wi:${wInk(c)}" ${open}>
       <div class="wtop"><span class="wbadge">${esc(w.badge || t.emoji)}${logo ? `<img src="${esc(logoBase() + logo)}.png" alt="" onerror="this.remove()">` : ''}</span>
-        <span class="wmain"><span class="wname">${esc(w.name)}</span><span class="wkind">${w.linked ? 'Follows your Savings' : esc(t.label)}${w.checked ? ' · as of ' + dayMonth(w.checked) : ''}</span></span>
+        <span class="wmain"><span class="wname">${esc(w.name)}</span><span class="wkind">${w.linked ? 'Follows your Savings' : w.td && !w.closed ? 'Term deposit · matures ' + dayMonth(w.td.maturity) : esc(t.label)}${w.checked && !(w.td && !w.closed) ? ' · as of ' + dayMonth(w.checked) : ''}</span></span>
         <span class="wbal">${w.debt ? '<small>You owe</small>' : ''}${wMoney(w.shown, w.currency)}</span></div>
       <div class="wbottom"><span>${w.number ? '•••• ' + esc(w.number) : ''}</span><span class="wtag">${esc(pName(w.owner))}</span></div></div>`;
   }
@@ -1360,6 +1494,7 @@
         <button class="icon-btn" data-act="wallet-edit" data-key="${esc(w.id)}" aria-label="Edit account" style="flex:none">✏️</button></div>
       <div class="wsolo">${walletCard(w, true)}</div>
       ${w.closed ? '<div class="notice">This account is closed, so it isn’t counted in your totals.</div>' : ''}
+      ${tdPanel(w)}
       <div class="two wactions"><button class="btn" data-act="wallet-transfer" data-key="${esc(w.id)}">🔁 Transfer</button><button class="btn" data-act="wallet-update" data-key="${esc(w.id)}">⚖️ ${w.linked ? 'Fix balance' : 'Update balance'}</button></div>
       ${!w.linked && !w.closed ? `<div class="wactions" style="display:grid;gap:10px;grid-template-columns:repeat(${w.debt ? 1 : 3}, minmax(0, 1fr))"><button class="btn" data-act="wallet-expense" data-key="${esc(w.id)}" style="width:100%">🧾 Expense</button>${w.debt ? '' : `<button class="btn" data-act="wallet-income" data-key="${esc(w.id)}">💰 Income</button><button class="btn" data-act="wallet-interest" data-key="${esc(w.id)}">🏦 Interest</button>`}</div>` : ''}
       <div style="text-align:center">${monthNav()}</div>
@@ -2449,6 +2584,13 @@
       rec.fromAccount = fa || (adjType === 'Add' ? ta : '') || state.M.accounts[0];
       rec.toAccount = ta || (adjType !== 'Add' ? fa : '') || state.M.accounts[1] || state.M.accounts[0];
     }
+    if (kind === 'wallets') {
+      // A term deposit's details are kept in the note; the form shows them as fields.
+      const t = E.tdOf(rec.note);
+      rec.note = t.note;
+      Object.assign(rec, t.td ? { tdOn: 'Yes', tdPlaced: t.td.placed, tdTerm: t.td.term, tdUnit: t.td.unit, tdRate: t.td.rate || '', tdRemind: t.td.remind }
+        : { tdOn: '', tdPlaced: '', tdTerm: '', tdUnit: 'm', tdRate: '', tdRemind: 3 });
+    }
     if (kind === 'interest') {
       rec.account = (fundOf(rec.fund) || {}).account || interestAccounts()[0];
       rec.fund = E.interestFundIn(rec.account, state.M.funds) || rec.fund;
@@ -2465,7 +2607,7 @@
     }
     const myrSaved = rec.currency === 'MYR';
     state.form = {
-      kind, rec, payType, bill: (opts && opts.bill) || '', billDate: kind === 'bills' ? rec.date : '',
+      kind, rec, payType, bill: (opts && opts.bill) || '', td: (opts && opts.td) || '', billDate: kind === 'bills' ? rec.date : '',
       isNew: opts && opts.isNew !== undefined ? opts.isNew : isNew,
       adjType: (opts && opts.adjType) || adjType,
       calc: {
@@ -2894,6 +3036,7 @@
         <div class="two">${field('Last 4 digits (optional)', 'number', r.number, 'type="text" inputmode="numeric" maxlength="4"')}
           ${field('Card colour', 'colour', r.colour || WALLET_COLOUR, 'type="color"')}</div>
         <input type="hidden" name="badge" value="${esc(r.badge)}"><input type="hidden" name="logo" value="${esc(r.logo)}">
+        ${r.type === 'savings' && !link ? tdFields(r) : ''}
         ${field('Note', 'note', r.note, 'type="text" placeholder="Optional"')}
         ${saved && !link ? `<label class="field"><span>Status</span><select name="closed"><option value="">Open</option><option value="Yes"${r.closed === 'Yes' ? ' selected' : ''}>Closed (left out of the totals)</option></select></label>` : ''}`;
     } else if (F.kind === 'walletChecks') {
@@ -3098,6 +3241,13 @@
       const saved = wOf(r.id);
       el.innerHTML = walletCard({ id: '', name: r.name || 'Account name', type: r.type, currency: r.currency, debt, owner: r.owner, colour: r.colour, badge: r.badge, logo: r.logo, number: r.number,
         linked: saved && saved.linked, shown: saved && saved.linked ? saved.shown : Number(r.opening) || 0 }, true);
+      const td = r.type === 'savings' ? tdForm(r) : null;
+      if (td) {
+        const exp = E.tdInterest(saved ? saved.shown : Number(r.opening) || 0, td);
+        el.innerHTML += `<div class="receipt" style="margin-top:12px">${line('🗓️ Matures', '<strong>' + dayLabel(td.maturity) + '</strong>')}
+          ${line('Term', esc(E.tdTermText(td)) + ' · ' + td.days + ' days')}${exp ? line('Interest at ' + td.rate + '%', '≈ ' + wMoney(exp, r.currency)) : ''}
+          ${line('Reminders', (td.remind ? fmtDate(E.addDays(td.maturity, -td.remind)) + ' and ' : '') + fmtDate(td.maturity))}</div>`;
+      } else if (r.tdOn === 'Yes' && r.type === 'savings') el.innerHTML += '<p class="muted small">Enter the date it was placed and the term to see when it matures.</p>';
     } else if (F.kind === 'walletChecks') {
       const w = wOf(r.walletId);
       const saved = w.events.find(e => e.id === r.id);
@@ -3259,6 +3409,14 @@
     }
     if (F.kind === 'paybacks' && F.isNew && !paybackOk(payload)) return;
     if (F.kind === 'wallets' && !payload.name) { toast('Give the account a name.', true); return; }
+    let tdSave = null; // a term deposit: its reminder bills are saved with the account
+    if (F.kind === 'wallets') {
+      const td = payload.type === 'savings' ? tdForm(payload) : null;
+      if (payload.type === 'savings' && payload.tdOn === 'Yes' && !td) { toast('Enter when the term deposit was placed and its term.', true); return; }
+      payload.note = E.tdNote(payload.note, td);
+      ['tdOn', 'tdPlaced', 'tdTerm', 'tdUnit', 'tdRate', 'tdRemind'].forEach(k => { delete payload[k]; });
+      tdSave = { td };
+    }
     if ((F.kind === 'expenses' || F.kind === 'bills') && payload.person === 'Shared' && F.splitMode === 'amount') {
       const v = splitVals();
       if (!v.total) { toast('Enter the total amount first.', true); return; }
@@ -3338,11 +3496,15 @@
     if (!payload.id) payload.id = newId(F.kind);
     if (payload.person) store.set('lastPerson', payload.person);
     if (F.kind === 'expenses') store.set('lastCategory', payload.category);
-    const reopen = { kind: F.kind, rec: Object.assign({}, F.rec), isNew: F.isNew, payType: F.payType, adjType: F.adjType, bill: F.bill };
+    const reopen = { kind: F.kind, rec: Object.assign({}, F.rec), isNew: F.isNew, payType: F.payType, adjType: F.adjType, bill: F.bill, td: F.td };
+    const tdItems = tdSave ? tdBillItems(payload.id, payload.name, payload.owner, tdSave.td, payload.closed === 'Yes') : [];
     const label = F.kind === 'income' && F.payType === 'other' ? 'Income' : KIND_LABEL[F.kind];
     if (addAnother) openForm(F.kind, newRecord(F.kind, { date: payload.date, person: payload.person, category: payload.category }));
     else closeModal();
     if (reopen.kind === 'walletTransfers') persistBundle(transferItems(payload), isNew ? '✓ Transfer added' : '✓ Saved', reopen);
+    else if (reopen.kind === 'wallets' && tdItems.length) {
+      persistBundle([{ kind: 'wallets', record: payload }].concat(tdItems), tdSave.td ? '✓ Saved · matures ' + fmtDate(tdSave.td.maturity) : '✓ Saved', reopen);
+    } else if (reopen.kind === 'interest' && reopen.td) tdInterestSaved(payload, reopen.td, reopen);
     else if (reopen.bill) {
       const moved = billMovedOn(reopen.bill, payload.date);
       persistBundle([{ kind: 'expenses', record: payload }, { kind: 'bills', record: moved }], moved.done ? '✓ Paid' : '✓ Paid · next due ' + dayLabel(moved.date), reopen);
@@ -3392,6 +3554,11 @@
       closeModal();
       persistBundle([{ kind, remove: id }, { kind: 'adjustments', remove: 'A-wt-' + id }, { kind: 'expenses', remove: 'E-wt-' + id }]
         .concat(adjHalf('A-wt-' + id) ? [{ kind: 'adjustments', remove: 'A-wt-' + id + '-in' }] : []), 'Deleted');
+      return;
+    }
+    if (kind === 'wallets' && tdBillIds(id).some(rawBill)) {
+      closeModal();
+      persistBundle([{ kind, remove: id }].concat(tdBillItems(id, '', '', null, true)), 'Deleted');
       return;
     }
     if (kind === 'adjustments' && adjHalf(id)) {
@@ -4080,6 +4247,14 @@
       renderForm();
     } else if (act === 'bill-auto') { readForm(); state.form.rec.auto = key; renderForm(); }
     else if (act === 'bill-done') { readForm(); state.form.rec.done = key; renderForm(); }
+    else if (act === 'wallet-td') {
+      readForm();
+      const r = state.form.rec;
+      r.tdOn = key;
+      if (key === 'Yes' && !r.tdPlaced) r.tdPlaced = r.date || state.M.today;
+      renderForm();
+    } else if (act === 'td-term') { readForm(); Object.assign(state.form.rec, { tdTerm: parseInt(key, 10), tdUnit: key.slice(-1) }); renderForm(); }
+    else if (act === 'td-interest') tdRecordInterest(wOf(key));
     else if (act === 'interest-record') openForm('interest', Object.assign(newRecord('interest'), { date: el.dataset.date }), { isNew: true });
     else if (act === 'interest-skip') { store.set('skip-interest-' + key, '1'); renderKeepingPlace(); }
     else if (act === 'settle-up') settleUp(); else if (act === 'split-add') {
@@ -4483,6 +4658,8 @@
       openForm('income', rec, { isNew: true });
     } else if (P.add === 'interest') {
       openForm('interest', newRecord('interest'), { isNew: true });
+    } else if (P.pay && isTdBill(P.pay)) {
+      tdRecordInterest(tdWalletOf(P.pay));
     } else if (P.pay && billOf(P.pay) && !billOf(P.pay).done) {
       payBill(P.pay);
     } else if (P.settle && state.M.split.amount >= 0.01) {

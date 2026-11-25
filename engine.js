@@ -223,6 +223,43 @@ function TrackerEngine() {
     return Object.assign({}, b, { lastPaid: paidOn || b.date, date: next || b.date, done: next ? '' : 'Yes' });
   }
 
+  // ---------- term deposits ----------
+
+  /**
+   * A term deposit's details go at the end of its Wallet account's note (the sheet has no columns for them):
+   * "[td 2026-11-25 6m 4.5% remind=3]" = placed on 25 Nov 2026 for 6 months (or "90d" for days), 4.5% a year
+   * (optional), remind 3 days before it matures. `note` comes back without the tag.
+   */
+  const TD_TAG = /\s*\[td ([^\]]*)\]/;
+  function tdOf(note) {
+    const s = String(note || '');
+    const m = TD_TAG.exec(s);
+    const rest = s.replace(TD_TAG, '').trim();
+    if (!m) return { note: rest, td: null };
+    const parts = m[1].trim().split(/\s+/);
+    const term = /^(\d+)([md])$/.exec(parts[1] || '');
+    if (!validDate(parts[0]) || !term || !(+term[1] > 0)) return { note: rest, td: null };
+    const rate = parts.find(p => /^[\d.]+%$/.test(p));
+    const remind = parts.find(p => /^remind=\d+$/.test(p));
+    const td = { placed: parts[0], term: +term[1], unit: term[2], rate: rate ? num(rate.slice(0, -1)) : 0, remind: remind ? Math.min(30, +remind.slice(7)) : 3 };
+    td.maturity = tdMaturity(td);
+    td.days = daysBetween(td.placed, td.maturity);
+    return { note: rest, td };
+  }
+  /** The note with a term deposit's tag (or without one, for `td` null). */
+  function tdNote(note, td) {
+    const rest = tdOf(note).note;
+    if (!td) return rest;
+    const tag = '[td ' + td.placed + ' ' + td.term + td.unit + (num(td.rate) > 0 ? ' ' + num(td.rate) + '%' : '') + ' remind=' + (isBlank(td.remind) ? 3 : num(td.remind)) + ']';
+    return (rest ? rest + ' ' : '') + tag;
+  }
+  /** When a term deposit matures: placed + term months (same day of the month) or days. */
+  const tdMaturity = td => (td.unit === 'd' ? addDays(td.placed, +td.term) : addMonthsKeepDay(td.placed, +td.term, +td.placed.slice(8, 10)));
+  /** Simple interest for the term: principal × rate a year × days / 365. */
+  const tdInterest = (principal, td) => (td && num(td.rate) > 0 ? round2(num(principal) * num(td.rate) / 100 * td.days / 365) : 0);
+  /** A term's length in words: "6 months", "90 days". */
+  const tdTermText = td => td.term + ' ' + (td.unit === 'd' ? 'day' : 'month') + (+td.term === 1 ? '' : 's');
+
   /** The 12 months of a financial year, Jul → Jun. */
   const fyMonths = fy => monthRange(fy.slice(2, 6) + '-07', (+fy.slice(2, 6) + 1) + '-06');
 
@@ -850,7 +887,7 @@ function TrackerEngine() {
       const w = {
         id: String(r.id), date: validDate(r.date) ? r.date : '', name: String(r.name || '').trim(), currency, country: currency === 'MYR' ? 'MY' : 'AU',
         type, debt, owner: byCode[r.owner] ? r.owner : SHARED, number: String(r.number || ''), opening, start: debt ? -opening : opening,
-        colour: r.colour || '', badge: String(r.badge || ''), logo: String(r.logo || ''), note: r.note || '', closed: yes(r.closed), linked: r.linked || '',
+        colour: r.colour || '', badge: String(r.badge || ''), logo: String(r.logo || ''), note: tdOf(r.note).note, td: tdOf(r.note).td, closed: yes(r.closed), linked: r.linked || '',
       };
       walletById[w.id] = w;
       return w;
@@ -1053,6 +1090,7 @@ function TrackerEngine() {
 
   return {
     compute, monthSummary, settingsOf, jointAccount, interestFundIn, fundRef, accountTags, tagNote, withhold, annualTax, autoScale, scaleFor, walletTransfer, walletMonth, WALLET_TYPES, FEE_CATEGORY,
+    tdOf, tdNote, tdMaturity, tdInterest, tdTermText,
     BILL_REPEATS, billsOf, billAud, billNext, billStatus, billExpense, billPaid, daysBetween,
     fyOf, fyMonths, fyName, normFy, monthOf, weekStart, addDays, addMonths, monthRange, todayISO,
     isBlank, num, pct, round2,
