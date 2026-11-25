@@ -112,6 +112,7 @@
   updatePreview = unmasked(updatePreview); // eslint-disable-line no-func-assign
   calcSync = unmasked(calcSync); // eslint-disable-line no-func-assign
   splitSync = unmasked(splitSync); // eslint-disable-line no-func-assign
+  paybackOk = unmasked(paybackOk); // eslint-disable-line no-func-assign
   const pctf = (n, d) => ((n || 0) * 100).toFixed(d === undefined ? 0 : d) + '%';
   const hrs = n => (Math.round((n || 0) * 100) / 100) + ' h';
   const fmtMonth = ym => MONTHS[+ym.slice(5, 7) - 1] + ' ' + ym.slice(0, 4);
@@ -3182,6 +3183,25 @@
 
   const OFFLINE_SAVE = '📡 You’re offline, so nothing was saved. The form stays open: save it again when you’re back online.';
 
+  /**
+   * A new payback that was already recorded (both phones recorded it, a tap that went through twice, or a save
+   * retried after it looked like it failed) would count twice and flip who owes whom. Ask before saving it again,
+   * and before a payback that pays back more than is owed.
+   */
+  function paybackOk(p) {
+    const M = state.M;
+    const amt = E.round2(Number(p.amount) || 0);
+    const same = (state.app.data.paybacks || []).find(r => r.from === p.from && r.to === p.to && r.date === p.date && Math.abs(E.round2(Number(r.amount) || 0) - amt) < 0.005);
+    if (same && !confirm(pName(p.from) + ' → ' + pName(p.to) + ' ' + money(amt) + ' on ' + dayLabel(p.date) + ' is already recorded. Record it again?')) return false;
+    const S = M.split;
+    if (!same && S.debtor === p.from && amt - S.amount > 0.004 &&
+      !confirm(pName(p.from) + ' only owes ' + money(S.amount) + '. Recording ' + money(amt) + ' means ' + pName(p.to) + ' will owe ' + money(amt - S.amount) + ' back. Save anyway?')) return false;
+    if (!same && S.debtor !== p.from && /paid back/i.test(p.note || '') &&
+      !confirm(S.amount < 0.005 ? 'Everything is already settled. Recording this means ' + pName(p.to) + ' will owe ' + pName(p.from) + ' ' + money(amt) + '. Save anyway?'
+        : pName(p.from) + ' doesn’t owe anything (' + pName(S.debtor) + ' owes ' + pName(S.creditor) + '). Save anyway?')) return false;
+    return true;
+  }
+
   function saveForm(addAnother) {
     readForm();
     if (isOffline()) { showNet(); toast(OFFLINE_SAVE, true); return; }
@@ -3194,6 +3214,7 @@
       if (blank(payload.amount) || !isFinite(amt) || (amt === 0 && F.kind !== 'walletChecks')) { toast('Enter an amount with the keypad.', true); return; }
       if (['adjustments', 'paybacks', 'walletTransfers'].indexOf(F.kind) >= 0 && amt < 0) { toast('The amount must be more than $0.', true); return; }
     }
+    if (F.kind === 'paybacks' && F.isNew && !paybackOk(payload)) return;
     if (F.kind === 'wallets' && !payload.name) { toast('Give the account a name.', true); return; }
     if ((F.kind === 'expenses' || F.kind === 'bills') && payload.person === 'Shared' && F.splitMode === 'amount') {
       const v = splitVals();
