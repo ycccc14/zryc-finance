@@ -58,6 +58,8 @@
     file: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
     sliders: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
+    eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    'eye-off': '<path d="M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-2.6 3.5M6.6 6.6C3.7 8.4 2 12 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="m3 3 18 18"/>',
     refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
     more: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
     close: '<path d="M6 6l12 12M18 6 6 18"/>',
@@ -91,9 +93,25 @@
   };
   const AUD = new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' });
   const DEC = new Intl.NumberFormat('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const money = n => (n < -0.004 ? '−' : '') + AUD.format(Math.abs(n || 0));
-  const signed = n => (n > 0.004 ? '+' : '') + money(n);
-  const myr = n => (n < -0.004 ? '−' : '') + 'RM ' + DEC.format(Math.abs(n || 0));
+  // 👁 Hide amounts: every amount shows as ****, except in the entry form while you type one.
+  let hideMoney = store.get('hideMoney') === '1';
+  let showAmounts = 0; // > 0 while the entry form draws
+  const masked = () => hideMoney && !showAmounts;
+  const MASK = '****';
+  const money = n => (masked() ? '$' + MASK : (n < -0.004 ? '−' : '') + AUD.format(Math.abs(n || 0)));
+  const signed = n => (n > 0.004 && !masked() ? '+' : '') + money(n);
+  const myr = n => (masked() ? 'RM ' + MASK : (n < -0.004 ? '−' : '') + 'RM ' + DEC.format(Math.abs(n || 0)));
+  /** Chart axis labels: none while amounts are hidden. */
+  const axisMoney = (v, sign) => (masked() ? '' : (sign || '$') + v.toLocaleString());
+  const unmasked = fn => function () {
+    showAmounts++;
+    try { return fn.apply(this, arguments); } finally { showAmounts--; }
+  };
+  // The entry form shows what's being typed (renderForm and updatePreview are hoisted function declarations).
+  renderForm = unmasked(renderForm); // eslint-disable-line no-func-assign
+  updatePreview = unmasked(updatePreview); // eslint-disable-line no-func-assign
+  calcSync = unmasked(calcSync); // eslint-disable-line no-func-assign
+  splitSync = unmasked(splitSync); // eslint-disable-line no-func-assign
   const pctf = (n, d) => ((n || 0) * 100).toFixed(d === undefined ? 0 : d) + '%';
   const hrs = n => (Math.round((n || 0) * 100) / 100) + ' h';
   const fmtMonth = ym => MONTHS[+ym.slice(5, 7) - 1] + ' ' + ym.slice(0, 4);
@@ -334,7 +352,7 @@
     const tabs = g[3].length > 1 ? `<nav class="band-tabs" aria-label="${g[1]}">${g[3].map(id =>
       `<button type="button" data-act="view" data-key="${id}"${id === state.view ? ' aria-current="page"' : ''}>${VIEWS.find(v => v[0] === id)[1]}</button>`).join('')}</nav>` : '';
     $('#band').innerHTML = `<div class="band-inner">
-      <div class="band-row">${wallet}<div class="band-tools">${search}${search
+      <div class="band-row">${wallet}<div class="band-tools">${search}<button class="icon-btn" data-act="hide-money" aria-pressed="${hideMoney}" aria-label="${hideMoney ? 'Show amounts' : 'Hide amounts'}" title="${hideMoney ? 'Show amounts' : 'Hide amounts'}">${ico(hideMoney ? 'eye-off' : 'eye', 18)}</button>${search
         ? `<button class="icon-btn" data-act="reload" aria-label="Refresh" title="Load the latest entries">${ico('refresh', 18)}</button>`
         : `<button class="sync-pill" data-act="reload" title="Load the latest entries from the Sheet">${ico('refresh', 16)}<span>${loadedTime()}</span></button>`}</div></div>
       ${g[0] !== 'home' ? `<div class="band-title">${g[1]}</div>` : ''}${tabs}
@@ -869,7 +887,7 @@
       options: {
         maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
         plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, tooltip: { callbacks: { label: ctx => ' ' + ctx.dataset.label + ': ' + money(ctx.parsed.y) } } },
-        scales: { y: { border: { display: false }, ticks: { callback: v => '$' + v.toLocaleString() } }, x: { grid: { display: false } } },
+        scales: { y: { border: { display: false }, ticks: { callback: v => axisMoney(v) } }, x: { grid: { display: false } } },
       },
     });
 
@@ -970,7 +988,7 @@
       options: {
         maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
         plugins: { legend: { display: false }, tooltip: { callbacks: { title: it => dayLabel(days[it[0].dataIndex]), label: ctx => ' Spent ' + money(ctx.parsed.y) } } },
-        scales: { y: { beginAtZero: true, border: { display: false }, ticks: { callback: v => '$' + v } }, x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } } },
+        scales: { y: { beginAtZero: true, border: { display: false }, ticks: { callback: v => axisMoney(v) } }, x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } } },
       },
     });
     const daily = `<section class="card"><div class="card-head"><h2>Daily Breakdown</h2><span class="hint">Average ${money(total / daysSoFar)}/day${peak[0] >= 0 ? ' · peak ' + money(peak[1]) + ' on ' + dayLabel(days[peak[0]]) : ''}</span></div>
@@ -1144,7 +1162,7 @@
       options: {
         maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
         plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, tooltip: { callbacks: { label: ctx => ' ' + ctx.dataset.label + ': ' + money(ctx.parsed.y) } } },
-        scales: { y: { beginAtZero: true, border: { display: false }, ticks: { callback: v => '$' + v.toLocaleString() } }, x: { grid: { display: false } } },
+        scales: { y: { beginAtZero: true, border: { display: false }, ticks: { callback: v => axisMoney(v) } }, x: { grid: { display: false } } },
       },
     });
 
@@ -1184,7 +1202,7 @@
 
   const wOf = id => state.M.wallets.find(w => w.id === id);
   const wMoney = (n, cur) => (cur === 'MYR' ? myr(n) : money(n));
-  const wSigned = (n, cur) => (n > 0.004 ? '+' : '') + wMoney(n, cur);
+  const wSigned = (n, cur) => (n > 0.004 && !masked() ? '+' : '') + wMoney(n, cur);
   const wPlace = cur => WALLET_PLACES.find(p => p[1] === cur);
   const rateText = r => '1 AUD = ' + +Number(r).toFixed(4) + ' MYR';
   /** Logos live with the iPhone app on GitHub Pages; the Google web app loads them from there. */
@@ -1300,7 +1318,7 @@
         options: {
           maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
           plugins: { legend: { display: false }, tooltip: { callbacks: { title: items => dayLabel(W.days[items[0].dataIndex].date), label: ctx => ' ' + wMoney(ctx.parsed.y, cur) } } },
-          scales: { y: { beginAtZero: true, border: { display: false }, ticks: { callback: v => (cur === 'MYR' ? 'RM ' : '$') + v.toLocaleString() } }, x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } } },
+          scales: { y: { beginAtZero: true, border: { display: false }, ticks: { callback: v => axisMoney(v, cur === 'MYR' ? 'RM ' : '$') } }, x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } } },
         },
       });
     }
@@ -1488,7 +1506,7 @@
       options: {
         maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
         plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, tooltip: { callbacks: { label: ctx => ' ' + ctx.dataset.label + ': ' + money(ctx.parsed.y) } } },
-        scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true, border: { display: false }, ticks: { callback: v => '$' + v } } },
+        scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true, border: { display: false }, ticks: { callback: v => axisMoney(v) } } },
       },
     });
     const head = `<tr><th class="sticky">Month</th>${accts.map(a => `<th class="num">${esc(aIcon(a))} ${esc(a)}</th>`).join('')}<th class="num">Total</th></tr>`;
@@ -1546,7 +1564,7 @@
       options: {
         maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
         plugins: { legend: { display: codes.length > 1, position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } }, tooltip: { callbacks: { label: ctx => ' ' + ctx.dataset.label + ': ' + money(ctx.parsed.y) } } },
-        scales: { y: { beginAtZero: true, border: { display: false }, ticks: { callback: v => '$' + v } }, x: { grid: { display: false } } },
+        scales: { y: { beginAtZero: true, border: { display: false }, ticks: { callback: v => axisMoney(v) } }, x: { grid: { display: false } } },
       },
     });
     const monthTable = table(`<tr><th>Month</th>${codes.map(c => `<th class="num">${esc(pName(c))}</th>`).join('')}</tr>`,
@@ -3998,6 +4016,10 @@
         return r ? Object.assign({}, f, { account: r[2], icon: f.icon || r[1] }) : f;
       });
       saveSettings({ funds: rows }, el, '✓ Accounts set: Everyday Account, Self Saving, GoalSaver, Shared Saving');
+    } else if (act === 'hide-money') {
+      hideMoney = !hideMoney;
+      store.set('hideMoney', hideMoney ? '1' : '0');
+      renderKeepingPlace();
     } else if (act === 'goal-saver') {
       const rows = state.app.data.settings.funds.map(f => (String(f.name).trim() === 'Emergency Fund' ? Object.assign({}, f, { account: 'GoalSaver' }) : f));
       saveSettings({ funds: rows }, el, '✓ Emergency Fund now goes to GoalSaver');
