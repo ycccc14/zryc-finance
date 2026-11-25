@@ -594,9 +594,22 @@
         <div><span class="k">${isNow ? 'Saved so far' : 'Saved'}</span><span class="v${left < -0.004 ? ' neg' : ''}">${money(left)}</span></div></div>
     </section>`;
 
+    // Accounts: 2 per row on a phone (an odd last one spans the row), each with its share of the total and its funds.
+    const acctTotal = sumOf(M.accounts, a => L[a].balance);
     const accts = `<div class="list-head"><h2>🏦 Accounts</h2><button class="btn link" data-act="view" data-key="accounts">See all ${ico('arrow', 16)}</button></div>
-      <div class="acct-strip">${M.accounts.map(a => `<div class="acct-mini" role="button" tabindex="0" data-act="view" data-key="accounts">
-        <div class="k"><span class="dot" style="--c:${aColour(a)}"></span>${esc(a)}</div><div class="v${neg(L[a].balance)}">${money(L[a].balance)}</div></div>`).join('')}</div>`;
+      <section class="acct-board">
+        <div class="acct-total"><span class="muted small">Total in ${M.accounts.length} account${M.accounts.length === 1 ? '' : 's'}</span><strong class="${neg(acctTotal).trim()}">${money(acctTotal)}</strong></div>
+        <div class="acct-strip">${M.accounts.map(a => {
+          const bal = L[a].balance;
+          const share = !masked() && acctTotal > 0.004 && bal > 0 ? bal / acctTotal : 0; // hidden amounts: no share either
+          const funds = fundsIn(a);
+          return `<div class="acct-mini" role="button" tabindex="0" data-act="view" data-key="accounts" style="--c:${aColour(a)}">
+          <div class="acct-top">${tile(aIcon(a), aColour(a), 'sm')}<span class="acct-share">${share ? pctf(share, share < 0.01 ? 1 : 0) : ''}</span></div>
+          <div class="k">${esc(a)}</div>
+          <div class="v${neg(bal)}">${money(bal)}</div>
+          <div class="acct-bar" aria-hidden="true"><span style="width:${(share * 100).toFixed(1)}%"></span></div>
+          <div class="acct-funds">${funds.length ? funds.map(f => esc(fIcon(f)) + ' ' + esc(f)).join(' · ') : '&nbsp;'}</div></div>`;
+        }).join('')}</div></section>`;
 
     const tabs = [['All', 'All']].concat(M.codes.map(c => [c, pName(c)]), [['Shared', 'Shared']]);
     const bills = `<div class="list-head act-head"><h2>💛 <span id="bills-title">${state.q ? 'Search results' : monthLong(m) + ' activity'}</span></h2>
