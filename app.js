@@ -131,7 +131,7 @@
     after: [],
     form: null,
     importer: { kind: 'expenses', headers: [], rows: [], map: {} },
-    loadedAt: Date.now(),
+    loadedAt: Number(BOOT.cachedAt) || Date.now(), // the iPhone app opened from its saved copy: when that copy was loaded
   };
 
   function call(fn) {
@@ -329,7 +329,7 @@
         ? `<button class="icon-btn" data-act="reload" aria-label="Refresh" title="Load the latest entries">${ico('refresh', 18)}</button>`
         : `<button class="sync-pill" data-act="reload" title="Load the latest entries from the Sheet">${ico('refresh', 16)}<span>${loadedTime()}</span></button>`}</div></div>
       ${g[0] !== 'home' ? `<div class="band-title">${g[1]}</div>` : ''}${tabs}
-      ${MONTH_VIEWS.indexOf(state.view) >= 0 ? `<div style="text-align:center">${monthNav()}</div>` : ''}</div>`;
+      ${MONTH_VIEWS.indexOf(state.view) >= 0 ? `<div style="text-align:center">${monthNav()}</div>` : ''}${netNote()}</div>`;
     $('#nav-side').innerHTML = VIEWS.map(([id, label, icon]) =>
       `<button type="button" data-act="view" data-key="${id}"${id === state.view ? ' aria-current="page"' : ''}>${ico(icon)}${label}</button>`).join('');
     const tab = gr => `<button type="button" data-act="group" data-key="${gr[0]}"${gr === g ? ' aria-current="page"' : ''}>${ico(gr[2], 22)}<span>${gr[1]}</span></button>`;
@@ -1731,12 +1731,15 @@
 
       <section class="card"><div class="card-head"><h2>🗂️ Data</h2></div>
         <div class="row">
+          <button class="btn primary" data-act="backup-csv">⬇️ Download a copy (CSV)</button>
           <a class="btn" href="${esc(state.app.sheetUrl)}" target="_blank" rel="noopener">Open the Google Sheet</a>
           <button class="btn" data-act="refresh-reports">Update report tabs</button>
           <button class="btn" data-act="sample-load">Load sample data</button>
           <button class="btn danger" data-act="sample-remove">Remove sample data</button>
-          <button class="btn danger" data-act="clear-all">🗑️ Delete all entries…</button>
+          ${window.__PWA__ ? '' : '<button class="btn danger" data-act="clear-all">🗑️ Delete all entries…</button>'}
         </div>
+        ${window.__PWA__ ? '<p class="muted small">🔒 <strong>Delete all entries</strong> is only on the Google link (on a computer), so a lost or stolen phone can’t wipe your book.</p>' : ''}
+        <p class="muted small">⬇️ <strong>Download a copy</strong> saves every entry ${window.__PWA__ ? 'this phone' : 'you'} can see in one file that opens in Excel, Numbers or Google Sheets. Keep one now and then; the Google Sheet stays the full copy.</p>
         <p class="muted small">Signed in as ${esc(state.app.user || 'unknown')}. Sample entries have IDs starting with "S-" and can be removed without touching your own entries.</p></section>
 
       ${window.__PWA__ ? '' : '<section class="card" id="log-card"></section>'}
@@ -1803,16 +1806,19 @@
       <ol class="small" style="padding-left:20px;margin:0 0 10px;display:grid;gap:4px">
         <li>On the iPhone, open <a href="${esc(url)}" target="_blank" rel="noopener">${esc(url.replace(/^https:[/][/]/, ''))}</a> in <strong>Safari</strong>.</li>
         <li>Tap <strong>Share</strong> ⬆︎ ▸ <strong>Add to Home Screen</strong> ▸ <strong>Add</strong>.</li>
-        <li>Open <strong>ZR &amp; YC</strong> from the Home Screen. Press <strong>Get pairing code</strong> below and type the code into the app.</li>
+        <li>Open <strong>ZR &amp; YC</strong> from the Home Screen. ${window.__PWA__
+          ? 'On a computer, open the Google link ▸ Me ▸ Settings ▸ Install on iPhone ▸ <strong>Get pairing code</strong>, and type the code into the new phone.'
+          : 'Press <strong>Get pairing code</strong> below and type the code into the app.'}</li>
       </ol>
-      <button class="btn primary" data-act="pair-code">🔑 Get pairing code</button>
-      <div id="pair-out"></div>
+      ${window.__PWA__
+        ? '<p class="muted small" style="margin:0">🔑 For safety, pairing codes come only from the Google link (Google sign-in), so a lost or stolen phone can’t let in a new one.</p>'
+        : '<button class="btn primary" data-act="pair-code">🔑 Get pairing code</button><div id="pair-out"></div>'}
       <h3 style="margin-top:14px">Paired phones</h3>
       ${devices.length ? devices.map(d => `<div class="spread" style="padding:8px 0;border-top:1px solid var(--line)">
         <span style="min-width:0"><strong>${esc(d.name)}</strong><div class="muted small">paired ${fmtDate(String(d.created).slice(0, 10))} · last used ${fmtDate(String(d.lastUsed).slice(0, 10))}</div></span>
         <button class="btn link danger" data-act="device-remove" data-key="${esc(d.id)}">Remove</button></div>`).join('')
         : '<p class="muted small" style="margin:4px 0 0">No phones paired yet.</p>'}
-      <p class="muted small" style="margin-bottom:0">🔒 Only paired phones can reach your data. Each code works once, for 30 minutes. Remove a phone here if it’s lost or replaced.</p>`;
+      <p class="muted small" style="margin-bottom:0">🔒 Only paired phones can reach your data. Each code works once, for 30 minutes. Lost or replaced a phone? Remove it here (from a computer or another paired phone): it stops at once, and it can’t pair itself back.</p>`;
   }
 
   /** Phone notifications card. Turning them on happens on the phone itself (the installed app). */
@@ -2896,8 +2902,8 @@
       ? `<h2 id="form-title">💸 ${F.isNew ? 'Payback / lend' : 'Edit payback'}</h2>`
       : walletTitle && F.isNew ? `<h2 id="form-title">${walletTitle}</h2>`
       : F.isNew
-      ? `<div class="seg kinds" role="group" aria-label="Entry type">${[['income', '💼 Income'], ['expenses', '🧾 Expense'], ['adjustments', '🔁 Adjust'], ['interest', '🏦 Interest']].map(([k, l]) =>
-        `<button type="button" data-act="form-kind" data-key="${k}" aria-pressed="${F.kind === k}">${l}</button>`).join('')}</div>`
+      ? `<div class="seg kinds" role="group" aria-label="Entry type">${[['income', '💼', 'Income'], ['expenses', '🧾', 'Expense'], ['adjustments', '🔁', 'Adjust'], ['interest', '🏦', 'Interest']].map(([k, e, l]) =>
+        `<button type="button" data-act="form-kind" data-key="${k}" aria-pressed="${F.kind === k}"><span class="k-ico" aria-hidden="true">${e} </span>${l}</button>`).join('')}</div>`
       : `<h2 id="form-title">Edit ${F.kind === 'income' && F.payType === 'other' ? 'other income' : KIND_LABEL[F.kind].toLowerCase()}</h2>`;
     const modal = $('#modal');
     const before = modal.hidden ? null : $('.sheet', modal);
@@ -3066,7 +3072,7 @@
   let pendingSaves = 0;
   let localEdits = 0; // changes shown here that a copy loaded from the server earlier won't have
   // `unsaved`: the iPhone app opened from this copy reloads in full, in case a save never arrived.
-  const cacheApp = () => { if (window.__trackerCache) window.__trackerCache(Object.assign({}, state.app, { unsaved: pendingSaves > 0 })); };
+  const cacheApp = () => { if (window.__trackerCache) window.__trackerCache(Object.assign({}, state.app, { unsaved: pendingSaves > 0, cachedAt: state.loadedAt })); };
   const refreshLocal = () => { localEdits++; recompute(); renderKeepingPlace(); cacheApp(); };
   window.addEventListener('beforeunload', e => {
     if (pendingSaves > 0) { e.preventDefault(); e.returnValue = ''; } // don't lose a save that's still on its way
@@ -3081,11 +3087,24 @@
     if (!pendingSaves) setTimeout(checkForUpdates, 0);
   }
 
+  /**
+   * Undoes one entry after its save failed: puts back how it was (`prev`), or takes it out if it was
+   * new. Only that entry, so other saves made meanwhile (which may have worked) stay on screen.
+   */
+  function undoEntry(kind, id, prev) {
+    const list = state.app.data[kind] || (state.app.data[kind] = []);
+    const j = list.findIndex(r => String(r.id) === String(id));
+    if (prev) {
+      if (j >= 0) list[j] = prev;
+      else list.push(prev);
+    } else if (j >= 0) list.splice(j, 1);
+  }
+
   /** Shows the change straight away, saves it in the background, and undoes it (reopening the form) if the save fails. */
   function persist(kind, rec, isNew, msg, reopen) {
     const list = state.app.data[kind] || (state.app.data[kind] = []);
-    const before = list.slice();
     const i = list.findIndex(r => String(r.id) === String(rec.id));
+    const prev = i >= 0 ? list[i] : null;
     if (i >= 0) list[i] = Object.assign({}, list[i], rec);
     else list.push(rec);
     refreshLocal();
@@ -3097,7 +3116,7 @@
       if (j >= 0 && res && res.record) now[j] = Object.assign({}, now[j], res.record);
       saveDone(res);
     }, err => {
-      state.app.data[kind] = before;
+      undoEntry(kind, rec.id, prev);
       refreshLocal();
       toast('Couldn’t save: ' + errText(err), true);
       if (reopen && !state.form) openForm(reopen.kind, reopen.rec, { isNew: reopen.isNew, payType: reopen.payType, adjType: reopen.adjType });
@@ -3107,11 +3126,12 @@
 
   /** Like persist, for entries that are saved together: all of them show now, and all are undone if the save fails. */
   function persistBundle(items, msg, reopen) {
-    const before = {};
+    const undo = []; // [kind, id, how it was (or null if new)], so only these entries are undone
     items.forEach(it => {
       const list = state.app.data[it.kind] || [];
-      if (!before[it.kind]) before[it.kind] = list.slice();
-      const rest = list.filter(r => String(r.id) !== String(it.remove || it.record.id));
+      const id = it.remove || it.record.id;
+      if (!undo.some(u => u[0] === it.kind && String(u[1]) === String(id))) undo.push([it.kind, id, list.find(r => String(r.id) === String(id)) || null]);
+      const rest = list.filter(r => String(r.id) !== String(id));
       state.app.data[it.kind] = it.remove ? rest : rest.concat(it.record);
     });
     refreshLocal();
@@ -3125,7 +3145,7 @@
       });
       saveDone(res);
     }, err => {
-      Object.keys(before).forEach(k => { state.app.data[k] = before[k]; });
+      undo.forEach(u => undoEntry(u[0], u[1], u[2]));
       refreshLocal();
       toast('Couldn’t save: ' + errText(err), true);
       if (reopen && !state.form) openForm(reopen.kind, reopen.rec, { isNew: reopen.isNew, bill: reopen.bill });
@@ -3133,27 +3153,11 @@
     });
   }
 
-  /**
-   * A new payback that was already recorded (both phones recorded it, a tap that went through twice, or a save
-   * retried after it looked like it failed) would count twice and flip who owes whom. Ask before saving it again,
-   * and before a payback that pays back more than is owed.
-   */
-  function paybackOk(p) {
-    const M = state.M;
-    const amt = E.round2(Number(p.amount) || 0);
-    const same = (state.app.data.paybacks || []).find(r => r.from === p.from && r.to === p.to && r.date === p.date && Math.abs(E.round2(Number(r.amount) || 0) - amt) < 0.005);
-    if (same && !confirm(pName(p.from) + ' → ' + pName(p.to) + ' ' + money(amt) + ' on ' + dayLabel(p.date) + ' is already recorded. Record it again?')) return false;
-    const S = M.split;
-    if (!same && S.debtor === p.from && amt - S.amount > 0.004 &&
-      !confirm(pName(p.from) + ' only owes ' + money(S.amount) + '. Recording ' + money(amt) + ' means ' + pName(p.to) + ' will owe ' + money(amt - S.amount) + ' back. Save anyway?')) return false;
-    if (!same && S.debtor !== p.from && /paid back/i.test(p.note || '') &&
-      !confirm(S.amount < 0.005 ? 'Everything is already settled. Recording this means ' + pName(p.to) + ' will owe ' + pName(p.from) + ' ' + money(amt) + '. Save anyway?'
-        : pName(p.from) + ' doesn’t owe anything (' + pName(S.debtor) + ' owes ' + pName(S.creditor) + '). Save anyway?')) return false;
-    return true;
-  }
+  const OFFLINE_SAVE = '📡 You’re offline, so nothing was saved. The form stays open: save it again when you’re back online.';
 
   function saveForm(addAnother) {
     readForm();
+    if (isOffline()) { showNet(); toast(OFFLINE_SAVE, true); return; }
     const F = state.form;
     const payload = Object.assign({}, F.rec);
     const needsAmount = F.kind !== 'wallets' && F.kind !== 'bills' && (F.kind !== 'income' || F.payType === 'other');
@@ -3163,7 +3167,6 @@
       if (blank(payload.amount) || !isFinite(amt) || (amt === 0 && F.kind !== 'walletChecks')) { toast('Enter an amount with the keypad.', true); return; }
       if (['adjustments', 'paybacks', 'walletTransfers'].indexOf(F.kind) >= 0 && amt < 0) { toast('The amount must be more than $0.', true); return; }
     }
-    if (F.kind === 'paybacks' && F.isNew && !paybackOk(payload)) return;
     if (F.kind === 'wallets' && !payload.name) { toast('Give the account a name.', true); return; }
     if ((F.kind === 'expenses' || F.kind === 'bills') && payload.person === 'Shared' && F.splitMode === 'amount') {
       const v = splitVals();
@@ -3281,6 +3284,7 @@
       toast('This account has ' + records + (records > 1 ? ' records' : ' record') + '. Set its status to Closed instead, or delete them first.', true);
       return;
     }
+    if (isOffline()) { showNet(); toast('📡 You’re offline, so nothing was deleted. Try again when you’re back online.', true); return; }
     if (!confirm('Delete this ' + KIND_LABEL[F.kind].toLowerCase() + '? This can\'t be undone.')) return;
     const kind = F.kind;
     const id = F.rec.id;
@@ -3289,14 +3293,15 @@
       persistBundle([{ kind, remove: id }, { kind: 'adjustments', remove: 'A-wt-' + id }, { kind: 'expenses', remove: 'E-wt-' + id }], 'Deleted');
       return;
     }
-    const before = (state.app.data[kind] || []).slice();
-    state.app.data[kind] = before.filter(r => String(r.id) !== String(id));
+    const list = state.app.data[kind] || [];
+    const prev = list.find(r => String(r.id) === String(id)) || null;
+    state.app.data[kind] = list.filter(r => String(r.id) !== String(id));
     closeModal();
     refreshLocal();
     toast('Deleted');
     pendingSaves++;
     call('deleteEntry', kind, id).then(saveDone, err => {
-      state.app.data[kind] = before;
+      if (prev) undoEntry(kind, id, prev); // only this entry comes back
       refreshLocal();
       toast('Couldn’t delete: ' + errText(err), true);
       saveDone(null);
@@ -3377,6 +3382,52 @@
       if (!icon.value) icon.value = rec[1];
     });
     toast('Accounts and colours filled in. Press "Save funds" to keep them.');
+  }
+
+  // ---------- backup ----------
+  /** Every entry on this device as one CSV (a Type column, then every field), for Excel, Numbers or Google Sheets. */
+  function backupCsv() {
+    const data = state.app.data || {};
+    const kinds = Object.keys(KIND_LABEL).filter(k => Array.isArray(data[k]) && data[k].length);
+    const cols = ['id', 'date', 'person', 'paidBy', 'amount', 'category', 'description', 'note']; // easiest to read first
+    kinds.forEach(k => data[k].forEach(r => Object.keys(r).forEach(c => { if (cols.indexOf(c) < 0) cols.push(c); })));
+    const cell = v => {
+      if (v === null || v === undefined) return '';
+      let s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+      if (/^[=+\-@]/.test(s) && isNaN(Number(s))) s = "'" + s; // a spreadsheet never runs it as a formula
+      return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const lines = [['Type'].concat(cols).map(cell).join(',')];
+    kinds.forEach(k => data[k].forEach(r => lines.push([KIND_LABEL[k]].concat(cols.map(c => r[c])).map(cell).join(','))));
+    // The byte-order mark tells Excel it's UTF-8 (emoji, ringgit notes, Chinese descriptions).
+    return { csv: '﻿' + lines.join('\r\n') + '\r\n', rows: lines.length - 1, name: 'ZR-YC-Finance-' + E.todayISO() + '.csv' };
+  }
+  window.__trackerBackup = backupCsv;
+
+  /** iPhone app: the share sheet (Save to Files, Mail…). Elsewhere: a normal download. */
+  async function downloadBackup() {
+    const b = backupCsv();
+    if (!b.rows) { toast('Nothing to download yet.', true); return; }
+    const done = '✓ ' + b.rows + ' entries in ' + b.name;
+    const file = typeof File === 'function' ? new File([b.csv], b.name, { type: 'text/csv' }) : null;
+    if (window.__PWA__ && file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: b.name });
+        toast(done);
+      } catch (err) {
+        if (!err || err.name !== 'AbortError') toast('Couldn’t share the file: ' + errText(err), true); // AbortError: closed the share sheet
+      }
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([b.csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = b.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    toast(done);
   }
 
   async function plainAction(fn, button, msg, confirmText, args) {
@@ -3474,11 +3525,42 @@
         if (pill) pill.textContent = loadedTime();
         if (state.stale && !state.form && !busy()) renderKeepingPlace();
       }
+      netFails = 0;
     } catch (err) {
       // Offline or asleep: try again next time.
+      netFails++;
     }
+    showNet();
     checking = false;
   }
+
+  // ---------- no connection ----------
+  // Offline (or the server can't be reached twice in a row): a line in the header says so and how old
+  // the numbers are, and saving is held back so nothing looks saved that isn't.
+  let netFails = 0; // background checks in a row that didn't reach the server
+  const isOffline = () => navigator.onLine === false;
+  const netDown = () => isOffline() || netFails >= 2;
+  /** When the data on screen was loaded: "2:46 pm" today, otherwise with the date. */
+  function loadedWhen() {
+    const d = new Date(state.loadedAt);
+    const day = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    return (day === E.todayISO() ? 'at ' : 'on ' + fmtDate(day) + ', ') + loadedTime();
+  }
+  function netNote() {
+    if (!netDown()) return '';
+    return `<div class="net-note" id="net-note" role="status">${isOffline()
+      ? '📡 <strong>Offline</strong> · showing what was loaded ' + loadedWhen() + '. New entries can’t be saved until you’re back online.'
+      : '📡 <strong>Can’t reach the server</strong> · showing what was loaded ' + loadedWhen() + '. Saving may not work right now.'}</div>`;
+  }
+  /** Shows or hides the line without redrawing the page. */
+  function showNet() {
+    const old = $('#net-note');
+    const html = netNote();
+    if (old) { if (html) old.outerHTML = html; else old.remove(); return; }
+    const inner = $('#band .band-inner');
+    if (html && inner) inner.insertAdjacentHTML('beforeend', html);
+  }
+  window.addEventListener('offline', showNet);
 
   window.__trackerReload = reload;
   window.__trackerCheck = checkForUpdates; // the iPhone app calls this when a notification arrives
@@ -3495,7 +3577,7 @@
   document.addEventListener('visibilitychange', backOnScreen);
   window.addEventListener('focus', backOnScreen);
   window.addEventListener('pageshow', backOnScreen);
-  window.addEventListener('online', checkForUpdates);
+  window.addEventListener('online', () => { netFails = 0; showNet(); checkForUpdates(); });
   // Typing in the page (not the pop-up form) holds back background redraws until it's saved or left.
   document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#view')) state.viewEdited = true; }, true);
 
@@ -3912,12 +3994,17 @@
       renderKeepingPlace();
     } else if (act === 'xfer-done') {
       const ids = key.split(',');
-      const before = state.app.data.income.map(r => Object.assign({}, r));
-      state.app.data.income.forEach(r => { if (ids.indexOf(String(r.id)) >= 0) r.transferred = state.M.today; });
+      const was = {}; // only these pays are put back if the save fails
+      state.app.data.income.forEach(r => { if (ids.indexOf(String(r.id)) >= 0) { was[r.id] = r.transferred; r.transferred = state.M.today; } });
       refreshLocal();
       toast('✓ Marked as transferred');
       pendingSaves++;
-      call('markTransferred', ids).then(saveDone, err => { state.app.data.income = before; refreshLocal(); toast(errText(err), true); saveDone(null); });
+      call('markTransferred', ids).then(saveDone, err => {
+        state.app.data.income.forEach(r => { if (r.id in was) r.transferred = was[r.id]; });
+        refreshLocal(); toast(errText(err), true); saveDone(null);
+      });
+    } else if (act === 'backup-csv') {
+      downloadBackup();
     } else if (act === 'clear-all') {
       const typed = prompt('This deletes EVERY pay, expense, adjustment and interest entry, and all wallet accounts. Settings and tax tables are kept.\n\nType DELETE to confirm.');
       if (typed === null) return;
