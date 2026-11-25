@@ -575,7 +575,7 @@ function TrackerEngine() {
     }).filter(Boolean).sort(byDate);
 
     // --- adjustments ---
-    const adjustments = (data.adjustments || []).map(r => {
+    let adjustments = (data.adjustments || []).map(r => {
       if (!validDate(r.date)) { warn('An adjustment has no valid date and was skipped.'); return null; }
       if (!byCode[r.person]) { warn('An adjustment on ' + r.date + ' has unknown person "' + r.person + '" and was skipped.'); return null; }
       const tags = accountTags(r.note);
@@ -595,7 +595,17 @@ function TrackerEngine() {
         betweenAccounts: !!(fromAccount && toAccount && fromAccount !== toAccount),
         amount: round2(num(r.amount)), note: tags.note,
       };
-    }).filter(Boolean).sort(byDate);
+    }).filter(Boolean);
+    // A move between accounts within one fund (Savings → Savings in GoalSaver) is saved as two halves,
+    // "ID" (taken out) and "ID-in" (put in), since the sheet won't take the same fund twice. Join them up.
+    const adjById = {};
+    adjustments.forEach(r => { adjById[r.id] = r; });
+    adjustments = adjustments.filter(r => {
+      const out = /-in$/.test(String(r.id)) && r.type === 'Add' ? adjById[String(r.id).slice(0, -3)] : null;
+      if (!out || out.type !== 'Deduct' || out.joined) return true;
+      Object.assign(out, { toFund: r.toFund, toAccount: r.toAccount, type: 'Transfer', joined: true, betweenAccounts: out.fromAccount !== r.toAccount });
+      return false;
+    }).sort(byDate);
 
     // --- bank interest (adds to a fund, and counts as taxable income) ---
     const interest = (data.interest || []).map(r => {

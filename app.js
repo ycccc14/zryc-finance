@@ -227,6 +227,24 @@
   const heldIn = account => (state.M.accountFunds && state.M.accountFunds[account]) || fundsIn(account);
   /** The account to tag on an adjustment's note when a fund is kept outside its own account (e.g. Savings in GoalSaver), else ''. */
   const awayIn = (fund, account) => (fund && account && (fundOf(fund) || {}).account !== account ? account : '');
+  /** An adjustment's second half (see adjItems), if there is one. */
+  const adjHalf = id => (state.app.data.adjustments || []).find(r => String(r.id) === String(id) + '-in');
+  /**
+   * The entries an adjustment saves as. The sheet won't take the same fund as From and To, so moving
+   * Savings from Self Saving to Savings in GoalSaver is saved as two linked entries: "ID" takes it out
+   * of Self Saving and "ID-in" puts it into GoalSaver (both notes say [from …] [to …]). The app shows them as one transfer.
+   */
+  function adjItems(rec, fromAcct, toAcct) {
+    const inId = rec.id + '-in';
+    if (rec.fromFund && rec.fromFund === rec.toFund && fromAcct && toAcct && fromAcct !== toAcct) {
+      const note = E.tagNote(rec.note, fromAcct, toAcct);
+      return [{ kind: 'adjustments', record: Object.assign({}, rec, { toFund: '', note }) },
+        { kind: 'adjustments', record: Object.assign({}, rec, { id: inId, fromFund: '', note }) }];
+    }
+    const items = [{ kind: 'adjustments', record: Object.assign({}, rec, { note: E.tagNote(rec.note, awayIn(rec.fromFund, fromAcct), awayIn(rec.toFund, toAcct)) }) }];
+    if (adjHalf(rec.id)) items.push({ kind: 'adjustments', remove: inId });
+    return items;
+  }
   /** Accounts that earn interest: all except the everyday spending account. */
   const interestAccounts = () => {
     const everyday = (fundOf('Living Expenses') || {}).account;
@@ -2473,9 +2491,12 @@
 
   function editEntry(kind, id) {
     // A transfer's fee expense and fund adjustment are changed through the transfer.
+    if (kind === 'adjustments') id = String(id).replace(/-in$/, ''); // a move saved as two halves opens as one
     const parent = /^[AE]-wt-(.+)$/.exec(String(id));
     if (parent) { kind = 'walletTransfers'; id = parent[1]; }
-    const rec = (state.app.data[kind] || []).find(r => String(r.id) === String(id));
+    let rec = (state.app.data[kind] || []).find(r => String(r.id) === String(id));
+    const half = kind === 'adjustments' && rec && adjHalf(rec.id);
+    if (half) rec = Object.assign({}, rec, { toFund: half.toFund });
     if (kind === 'walletTransfers' && (!rec || !wOf(rec.fromId) || !wOf(rec.toId))) { toast('This is part of a private wallet transfer.', true); return; }
     if (rec) openForm(kind, rec);
   }
@@ -3291,13 +3312,14 @@
       Object.assign(payload, w ? { walletId: w.id, walletName: w.name, fund: '', at: payload.at || Date.now() } : { walletId: '', walletName: '', at: '' });
       delete payload.account;
     }
+    let adjAccts = null;
     if (F.kind === 'adjustments') {
       if (F.adjType === 'Account' && payload.fromAccount === payload.toAccount) { toast('Choose two different accounts.', true); return; }
       if (F.adjType === 'Transfer') payload.toAccount = payload.fromAccount;
       if (F.adjType === 'Transfer' && payload.fromFund === payload.toFund) { toast('Choose two different funds.', true); return; }
       if (F.adjType === 'Add') payload.fromFund = '';
       if (F.adjType === 'Deduct') payload.toFund = '';
-      payload.note = E.tagNote(payload.note, awayIn(payload.fromFund, payload.fromAccount), awayIn(payload.toFund, payload.toAccount));
+      adjAccts = [F.adjType === 'Add' ? '' : payload.fromAccount, F.adjType === 'Deduct' ? '' : payload.toAccount];
       delete payload.fromAccount;
       delete payload.toAccount;
     }
@@ -3325,7 +3347,12 @@
       const moved = billMovedOn(reopen.bill, payload.date);
       persistBundle([{ kind: 'expenses', record: payload }, { kind: 'bills', record: moved }], moved.done ? '✓ Paid' : '✓ Paid · next due ' + dayLabel(moved.date), reopen);
     } else if (reopen.kind === 'bills') persist('bills', payload, isNew, (isNew ? '✓ Bill added' : '✓ Saved') + (payload.done ? '' : ' · due ' + dayLabel(payload.date)), reopen);
-    else persist(reopen.kind, payload, isNew, isNew ? '✓ ' + label + ' added' : '✓ Saved', reopen);
+    else if (reopen.kind === 'adjustments') {
+      const items = adjItems(payload, adjAccts[0], adjAccts[1]);
+      const msg = isNew ? '✓ ' + label + ' added' : '✓ Saved';
+      if (items.length > 1) persistBundle(items, msg, reopen);
+      else persist('adjustments', items[0].record, isNew, msg, reopen);
+    } else persist(reopen.kind, payload, isNew, isNew ? '✓ ' + label + ' added' : '✓ Saved', reopen);
   }
 
   /** A transfer, plus the entries it makes in the budget: its fee as an expense, and any move in or out of a Savings account. */
@@ -3335,12 +3362,11 @@
     const x = E.walletTransfer(from.currency, to.currency, t, state.M.general.exchangeRate);
     // These two rows are seen by both of you, so they name the countries and not the private accounts.
     const route = wPlace(from.currency)[3] + ' → ' + wPlace(to.currency)[3];
-    const adjustment = { kind: 'adjustments', remove: 'A-wt-' + t.id };
+    let adjustment = [{ kind: 'adjustments', remove: 'A-wt-' + t.id }].concat(adjHalf('A-wt-' + t.id) ? [{ kind: 'adjustments', remove: 'A-wt-' + t.id + '-in' }] : []);
     const fee = { kind: 'expenses', remove: 'E-wt-' + t.id };
     if (from.linked || to.linked) {
-      delete adjustment.remove;
-      adjustment.record = { id: 'A-wt-' + t.id, date: t.date, person: t.person, fromFund: from.linked ? t.fromFund : '', toFund: to.linked ? t.toFund : '', amount: to.linked ? x.received : x.converted,
-        note: E.tagNote('Wallet transfer: ' + route, from.linked ? awayIn(t.fromFund, from.linked) : '', to.linked ? awayIn(t.toFund, to.linked) : '') };
+      adjustment = adjItems({ id: 'A-wt-' + t.id, date: t.date, person: t.person, fromFund: from.linked ? t.fromFund : '', toFund: to.linked ? t.toFund : '', amount: to.linked ? x.received : x.converted,
+        note: 'Wallet transfer: ' + route }, from.linked || '', to.linked || '');
     }
     if (x.fee) {
       delete fee.remove;
@@ -3348,7 +3374,7 @@
       fee.record = { id: 'E-wt-' + t.id, date: t.date, person: t.person, paidBy: t.person, amount: x.feeAUD, category: E.FEE_CATEGORY, description: route, splitPct: '', fund: t.fromFund || '',
         currency: myrFee ? 'MYR' : '', fxAmount: myrFee ? x.fee : '', fxRate: myrFee ? x.rate || state.M.general.exchangeRate : '' };
     }
-    return [{ kind: 'walletTransfers', record: t }, adjustment, fee];
+    return [{ kind: 'walletTransfers', record: t }].concat(adjustment, [fee]);
   }
 
   function deleteForm() {
@@ -3364,7 +3390,13 @@
     const id = F.rec.id;
     if (kind === 'walletTransfers') {
       closeModal();
-      persistBundle([{ kind, remove: id }, { kind: 'adjustments', remove: 'A-wt-' + id }, { kind: 'expenses', remove: 'E-wt-' + id }], 'Deleted');
+      persistBundle([{ kind, remove: id }, { kind: 'adjustments', remove: 'A-wt-' + id }, { kind: 'expenses', remove: 'E-wt-' + id }]
+        .concat(adjHalf('A-wt-' + id) ? [{ kind: 'adjustments', remove: 'A-wt-' + id + '-in' }] : []), 'Deleted');
+      return;
+    }
+    if (kind === 'adjustments' && adjHalf(id)) {
+      closeModal();
+      persistBundle([{ kind, remove: id }, { kind, remove: id + '-in' }], 'Deleted');
       return;
     }
     const list = state.app.data[kind] || [];
