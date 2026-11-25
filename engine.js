@@ -70,6 +70,23 @@ function TrackerEngine() {
    */
   const ACCOUNT_MOVES = { 'Emergency Fund': [{ before: '2026-11-25', account: 'Self Saving' }] };
 
+  /**
+   * Funds that can also be kept in another fund's bank account. Savings money can sit in GoalSaver
+   * (wherever Emergency Fund is) next to the Emergency money. Pay doesn't change: the Savings share of
+   * each pay still goes to Savings' own account (Self Saving); you move it across with a transfer.
+   */
+  const ALSO_HELD_WITH = { 'Savings': 'Emergency Fund' };
+
+  /**
+   * A fund kept outside its own account is saved as "Fund@Account" in an adjustment's From / To fund
+   * (e.g. "Savings@GoalSaver"), so no new columns are needed. Plain "Savings" means its own account.
+   */
+  function fundRef(v) {
+    const s = String(v || '').trim();
+    const i = s.lastIndexOf('@');
+    return i < 0 ? { fund: s, account: '' } : { fund: s.slice(0, i).trim(), account: s.slice(i + 1).trim() };
+  }
+
   /** A bank account both of you own (Shared Saving, or any account with "Shared" in its name). */
   const jointAccount = name => /shared/i.test(String(name || ''));
 
@@ -445,6 +462,16 @@ function TrackerEngine() {
       const past = (ACCOUNT_MOVES[f] || []).filter(m => m.account !== now && date < m.before).sort((x, y) => (x.before < y.before ? -1 : 1))[0];
       return past ? past.account : now;
     };
+    /** The funds whose money can be in a bank account: the ones mapped to it, plus ALSO_HELD_WITH. */
+    const heldIn = a => fundNames.filter(f => fundAccount[f] === a).concat(fundNames.filter(f => fundAccount[f] !== a &&
+      ALSO_HELD_WITH[f] && fundAccount[ALSO_HELD_WITH[f]] === a && a !== 'Unassigned' && !jointAccount(a)));
+    /** An adjustment's fund and the account it's in: "Savings@GoalSaver", or a plain fund in its own account. */
+    const fundAt = (v, date) => {
+      const ref = fundRef(v);
+      if (!ref.fund) return { fund: '', account: '' };
+      const ok = ref.account && fundAccount[ref.fund] && heldIn(ref.account).indexOf(ref.fund) >= 0;
+      return { fund: ref.fund, account: ok ? ref.account : accountOn(ref.fund, date) || '' };
+    };
     const catFund = {};
     S.categories.forEach(c => { catFund[c.name] = c.fund; });
 
@@ -540,14 +567,16 @@ function TrackerEngine() {
     const adjustments = (data.adjustments || []).map(r => {
       if (!validDate(r.date)) { warn('An adjustment has no valid date and was skipped.'); return null; }
       if (!byCode[r.person]) { warn('An adjustment on ' + r.date + ' has unknown person "' + r.person + '" and was skipped.'); return null; }
-      const fromFund = String(r.fromFund || '').trim();
-      const toFund = String(r.toFund || '').trim();
+      const from = fundAt(r.fromFund, r.date);
+      const to = fundAt(r.toFund, r.date);
+      const fromFund = from.fund;
+      const toFund = to.fund;
       if (!fromFund && !toFund) { warn('An adjustment on ' + r.date + ' has no fund and was skipped.'); return null; }
       [fromFund, toFund].forEach(f => {
         if (f && fundNames.indexOf(f) < 0) warn('An adjustment on ' + r.date + ' uses unknown fund "' + f + '".');
       });
-      const fromAccount = (fromFund && accountOn(fromFund, r.date)) || '';
-      const toAccount = (toFund && accountOn(toFund, r.date)) || '';
+      const fromAccount = from.account;
+      const toAccount = to.account;
       return {
         id: r.id, date: r.date, month: monthOf(r.date), person: r.person, fromFund, toFund, fromAccount, toAccount,
         type: fromFund && toFund ? 'Transfer' : toFund ? 'Add' : 'Deduct',
@@ -720,34 +749,47 @@ function TrackerEngine() {
           months[m] = {};
           FLOWS.forEach(x => { months[m][x] = 0; });
         });
-        ledgers[k][a] = { months, funds: fundNames.filter(f => fundAccount[f] === a) };
+        const byFund = {}; // how much of the balance belongs to each fund kept here
+        heldIn(a).forEach(f => { byFund[f] = 0; });
+        ledgers[k][a] = { months, funds: heldIn(a), byFund };
         FLOWS.forEach(x => { ledgers[k][a][x] = 0; });
       });
     });
-    const bump = (k, account, month, flow, v) => {
+    const OUT_FLOWS = ['spent', 'transferOut', 'deducted'];
+    const bump = (k, account, month, flow, v, fund) => {
       const L = ledgers[k][account];
       if (!L) return;
       L[flow] += v;
       if (L.months[month]) L.months[month][flow] += v;
+      if (fund) L.byFund[fund] = (L.byFund[fund] || 0) + (OUT_FLOWS.indexOf(flow) >= 0 ? -v : v);
     };
     income.forEach(r => {
       if (r.date < start) return;
-      [r.person, ALL].forEach(k => fundNames.forEach(f => bump(k, accountOn(f, r.date), r.month, 'allocated', r.alloc[f])));
+      [r.person, ALL].forEach(k => fundNames.forEach(f => bump(k, accountOn(f, r.date), r.month, 'allocated', r.alloc[f], f)));
     });
     expenses.forEach(r => {
       if (r.date < start || !fundAccount[r.fund]) return;
-      Object.keys(r.shares).forEach(c => [c, ALL].forEach(k => bump(k, accountOn(r.fund, r.date), r.month, 'spent', r.shares[c])));
+      Object.keys(r.shares).forEach(c => [c, ALL].forEach(k => bump(k, accountOn(r.fund, r.date), r.month, 'spent', r.shares[c], r.fund)));
     });
     adjustments.forEach(r => {
-      if (r.date < start || (r.fromAccount && r.fromAccount === r.toAccount)) return;
+      if (r.date < start) return;
       [r.person, ALL].forEach(k => {
-        if (r.fromAccount) bump(k, r.fromAccount, r.month, r.toAccount ? 'transferOut' : 'deducted', r.amount);
-        if (r.toAccount) bump(k, r.toAccount, r.month, r.fromAccount ? 'transferIn' : 'added', r.amount);
+        if (r.fromAccount && r.fromAccount === r.toAccount) {
+          // Between two funds in the same account: the account's total stays the same.
+          const L = ledgers[k][r.fromAccount];
+          if (L && r.fromFund !== r.toFund) {
+            L.byFund[r.fromFund] = (L.byFund[r.fromFund] || 0) - r.amount;
+            L.byFund[r.toFund] = (L.byFund[r.toFund] || 0) + r.amount;
+          }
+          return;
+        }
+        if (r.fromAccount) bump(k, r.fromAccount, r.month, r.toAccount ? 'transferOut' : 'deducted', r.amount, r.fromFund);
+        if (r.toAccount) bump(k, r.toAccount, r.month, r.fromAccount ? 'transferIn' : 'added', r.amount, r.toFund);
       });
     });
     interest.forEach(r => {
       if (r.date < start || r.wallet) return;
-      Object.keys(r.shares).forEach(c => [c, ALL].forEach(k => bump(k, r.account, r.month, 'interest', r.shares[c])));
+      Object.keys(r.shares).forEach(c => [c, ALL].forEach(k => bump(k, r.account, r.month, 'interest', r.shares[c], r.fund)));
     });
     const flowIn = x => x.allocated + x.interest + x.transferIn + x.added;
     const flowOut = x => x.spent + x.transferOut + x.deducted;
@@ -935,7 +977,7 @@ function TrackerEngine() {
       today, currentFY,
       general: S.general,
       people: S.people, codes, keys, funds: S.funds, fundNames, categories: S.categories,
-      accounts: accountNames, ledgers,
+      accounts: accountNames, ledgers, accountFunds: accountNames.reduce((o, a) => { o[a] = heldIn(a); return o; }, {}),
       allocations: S.allocations,
       currentAllocation: allocationFor(today, S.allocations),
       income, expenses, adjustments, interest, paybacks, split, bills: billsOf(data.bills, codes),
@@ -988,7 +1030,7 @@ function TrackerEngine() {
   }
 
   return {
-    compute, monthSummary, settingsOf, jointAccount, interestFundIn, withhold, annualTax, autoScale, scaleFor, walletTransfer, walletMonth, WALLET_TYPES, FEE_CATEGORY,
+    compute, monthSummary, settingsOf, jointAccount, interestFundIn, fundRef, withhold, annualTax, autoScale, scaleFor, walletTransfer, walletMonth, WALLET_TYPES, FEE_CATEGORY,
     BILL_REPEATS, billsOf, billAud, billNext, billStatus, billExpense, billPaid, daysBetween,
     fyOf, fyMonths, fyName, normFy, monthOf, weekStart, addDays, addMonths, monthRange, todayISO,
     isBlank, num, pct, round2,
