@@ -221,7 +221,12 @@
     const bal = balOf(a);
     return `<div class="acct-chip" title="${esc(a)}"><span class="i" aria-hidden="true">${esc(aIcon(a))}</span><span class="k">${esc(aShort(a))}</span><span class="v${neg(bal)}">${money(bal)}</span></div>`;
   }).join('')}</div>`;
+  /** The funds mapped to an account: where each pay's share goes. */
   const fundsIn = account => state.M.fundNames.filter(f => fundOf(f).account === account);
+  /** The funds whose money can be kept in an account (also Savings in GoalSaver), for transfers and balances. */
+  const heldIn = account => (state.M.accountFunds && state.M.accountFunds[account]) || fundsIn(account);
+  /** How an adjustment saves a fund in an account: "Savings@GoalSaver" when it's not the fund's own account. */
+  const fundAt = (fund, account) => (!fund || !account || (fundOf(fund) || {}).account === account ? fund || '' : fund + '@' + account);
   /** Accounts that earn interest: all except the everyday spending account. */
   const interestAccounts = () => {
     const everyday = (fundOf('Living Expenses') || {}).account;
@@ -1150,7 +1155,7 @@
       const split = sel === 'All' ? `<div class="row">${M.codes.map(c => `<span class="chip">${avatar(c)}${money(M.ledgers[c][a].balance)}</span>`).join('')}</div>` : '';
       return `<section class="card">
         <div class="card-head"><span class="row" style="flex-wrap:nowrap;min-width:0">${tile(aIcon(a), aColour(a))}<span class="stack" style="gap:0;min-width:0"><h2>${esc(a)}</h2>
-          <span class="muted small">${fundsIn(a).map(f => esc(fIcon(f)) + ' ' + esc(f)).join(' · ')}</span></span></span></div>
+          <span class="muted small">${heldIn(a).map(f => esc(fIcon(f)) + ' ' + esc(f) + (heldIn(a).length > fundsIn(a).length ? ' ' + money(A.byFund[f] || 0) : '')).join(' · ')}</span></span></span></div>
         <div style="font-size:28px;font-weight:800;letter-spacing:-.02em" class="${neg(A.balance).trim()}">${money(A.balance)}</div>
         <div class="muted small">${myr(A.balanceMYR)}</div>
         <div class="stats" style="margin:12px 0">${stat('Money in', money(A.in), 'pay ' + money(A.allocated) + (A.transferIn ? ' · transfers ' + money(A.transferIn) : '') + (A.added ? ' · added ' + money(A.added) : ''))}
@@ -2388,7 +2393,7 @@
     if (kind === 'wallets') {
       return { date, name: '', currency: (keep && keep.currency) || 'AUD', type: '', owner: M.viewer, number: '', opening: '', colour: WALLET_COLOUR, badge: '', logo: '', note: '', closed: '' };
     }
-    if (kind === 'walletChecks') return { date, walletId: keep.walletId, amount: '', note: '', fund: fundsIn(wOf(keep.walletId).linked)[0] || '' };
+    if (kind === 'walletChecks') return { date, walletId: keep.walletId, amount: '', note: '', fund: heldIn(wOf(keep.walletId).linked)[0] || '' };
     if (kind === 'walletTransfers') {
       const open = M.wallets.filter(w => !w.closed);
       const from = open.find(w => w.id === (keep && keep.fromId)) || open.find(w => w.currency === 'AUD') || open[0];
@@ -2414,11 +2419,15 @@
     if (kind === 'expenses' || kind === 'bills') rec.splitPct = blank(rec.splitPct) ? '' : +(E.pct(rec.splitPct) * 100).toFixed(8);
     let adjType = null;
     if (kind === 'adjustments') {
-      const fa = (fundOf(rec.fromFund) || {}).account;
-      const ta = (fundOf(rec.toFund) || {}).account;
+      const from = E.fundRef(rec.fromFund);
+      const to = E.fundRef(rec.toFund);
+      rec.fromFund = from.fund;
+      rec.toFund = to.fund;
+      const fa = from.account || (fundOf(from.fund) || {}).account;
+      const ta = to.account || (fundOf(to.fund) || {}).account;
       adjType = rec.fromFund && rec.toFund ? (fa && ta && fa !== ta ? 'Account' : 'Transfer') : rec.toFund ? 'Add' : 'Deduct';
-      rec.fromAccount = fa || state.M.accounts[0];
-      rec.toAccount = ta || state.M.accounts[1] || state.M.accounts[0];
+      rec.fromAccount = fa || (adjType === 'Add' ? ta : '') || state.M.accounts[0];
+      rec.toAccount = ta || (adjType !== 'Add' ? fa : '') || state.M.accounts[1] || state.M.accounts[0];
     }
     if (kind === 'interest') {
       rec.account = (fundOf(rec.fund) || {}).account || interestAccounts()[0];
@@ -2600,14 +2609,14 @@
   const walletAmt = x => (x && x.myr !== null ? ' · ' + myr(x.myr) : '');
 
   /** The funds in one bank account. */
-  const accountFunds = (name, value, account) => `<select name="${name}">${fundsIn(account).map(f => `<option value="${esc(f)}"${f === value ? ' selected' : ''}>${esc(fIcon(f))} ${esc(f)}</option>`).join('')}</select>`;
+  const accountFunds = (name, value, account) => `<select name="${name}">${heldIn(account).map(f => `<option value="${esc(f)}"${f === value ? ' selected' : ''}>${esc(fIcon(f))} ${esc(f)}</option>`).join('')}</select>`;
 
   /** Keeps a transfer's funds inside the accounts it uses. */
   function transferFunds(r) {
     const from = wOf(r.fromId);
     const to = wOf(r.toId);
-    if (from.linked && fundsIn(from.linked).indexOf(r.fromFund) < 0) r.fromFund = fundsIn(from.linked)[0] || '';
-    r.toFund = !to.linked ? '' : fundsIn(to.linked).indexOf(r.toFund) >= 0 ? r.toFund : fundsIn(to.linked)[0] || '';
+    if (from.linked && heldIn(from.linked).indexOf(r.fromFund) < 0) r.fromFund = heldIn(from.linked)[0] || '';
+    r.toFund = !to.linked ? '' : heldIn(to.linked).indexOf(r.toFund) >= 0 ? r.toFund : heldIn(to.linked)[0] || '';
     return r;
   }
 
@@ -2910,21 +2919,24 @@
         <div class="two">${field('Date paid', 'date', r.date, 'type="date" required')}
           ${field('Note', 'note', r.note, 'type="text" placeholder="e.g. October interest"')}</div>`;
     } else {
-      // Fund dropdowns grouped by bank account (or limited to one account).
-      const fundOpts = (name, value, account) => `<select name="${name}">${M.accounts.filter(a => !account || a === account).map(a =>
-        `<optgroup label="${esc(aIcon(a))} ${esc(a)}">${fundsIn(a).map(f => `<option value="${esc(f)}"${f === value ? ' selected' : ''}>${esc(fIcon(f))} ${esc(f)}</option>`).join('')}</optgroup>`).join('')}</select>`;
+      // Pick the bank account first, then a fund kept in it (Savings can also be in GoalSaver).
+      const fundOpts = (name, value, account) => `<select name="${name}">${heldIn(account).map(f => `<option value="${esc(f)}"${f === value ? ' selected' : ''}>${esc(fIcon(f))} ${esc(f)}</option>`).join('')}</select>`;
       const acctOpts = (name, value) => `<select name="${name}">${M.accounts.map(a => `<option value="${esc(a)}"${a === value ? ' selected' : ''}>${esc(aIcon(a))} ${esc(a)}</option>`).join('')}</select>`;
       const types = [['Account', '🏦', 'Between accounts'], ['Transfer', '🔁', 'Between funds'], ['Add', '➕', 'Add money'], ['Deduct', '➖', 'Take out']];
       const t = F.adjType;
+      const fromAcct = t === 'Add' ? '' : r.fromAccount;
+      const toAcct = t === 'Deduct' ? '' : t === 'Transfer' ? r.fromAccount : r.toAccount;
+      if (t === 'Transfer' && (r.toFund === r.fromFund || heldIn(toAcct).indexOf(r.toFund) < 0)) r.toFund = heldIn(toAcct).find(f => f !== r.fromFund) || r.toFund;
       body = `
         <div class="type-cards">${types.map(([k, e, l]) => `<button type="button" data-act="form-adjtype" data-key="${k}" aria-pressed="${F.adjType === k}"><span class="e">${e}</span>${l}</button>`).join('')}</div>
         <div class="field"><span>Whose funds?</span>${who(r.person, people)}</div>
         ${keypad(false)}
-        ${t === 'Account' ? `<div class="two"><label class="field"><span>From account</span>${acctOpts('fromAccount', r.fromAccount)}</label>
-          <label class="field"><span>To account</span>${acctOpts('toAccount', r.toAccount)}</label></div>` : ''}
+        <div class="${t === 'Account' ? 'two' : ''}">
+          ${fromAcct ? `<label class="field"><span>${t === 'Account' ? 'From account' : 'Account'}</span>${acctOpts('fromAccount', fromAcct)}</label>` : ''}
+          ${t === 'Account' || t === 'Add' ? `<label class="field"><span>${t === 'Account' ? 'To account' : 'Account'}</span>${acctOpts('toAccount', toAcct)}</label>` : ''}</div>
         <div class="two">
-          ${t !== 'Add' ? `<label class="field"><span>${t === 'Account' ? 'Taken from fund' : 'From fund'}</span>${fundOpts('fromFund', r.fromFund || M.fundNames[0], t === 'Account' ? r.fromAccount : '')}</label>` : ''}
-          ${t !== 'Deduct' ? `<label class="field"><span>${t === 'Account' ? 'Into fund' : t === 'Add' ? 'Add to fund' : 'To fund'}</span>${fundOpts('toFund', r.toFund || M.fundNames[1], t === 'Account' ? r.toAccount : '')}</label>` : ''}</div>
+          ${t !== 'Add' ? `<label class="field"><span>${t === 'Account' ? 'Taken from fund' : 'From fund'}</span>${fundOpts('fromFund', r.fromFund, fromAcct)}</label>` : ''}
+          ${t !== 'Deduct' ? `<label class="field"><span>${t === 'Account' ? 'Into fund' : t === 'Add' ? 'Add to fund' : 'To fund'}</span>${fundOpts('toFund', r.toFund, toAcct)}</label>` : ''}</div>
         <div class="two">${field('Date', 'date', r.date, 'type="date" required')}
           ${field('Note', 'note', r.note, 'type="text" placeholder="e.g. opening balance, extra pay, bank fee"')}</div>`;
     }
@@ -3096,9 +3108,9 @@
           : '<span class="muted small">All of it goes into this one fund (not split by the budget %), and into the year-end tax estimate.</span>');
     } else {
       const amt = money(Number(r.amount) || 0);
-      const acctOf = f => esc((fundOf(f) || {}).account || '');
-      el.innerHTML = (F.adjType !== 'Add' ? line(`${esc(fIcon(r.fromFund))} ${esc(r.fromFund || '')} <span class="muted small">${acctOf(r.fromFund)}</span>`, '−' + amt, ' neg') : '') +
-        (F.adjType !== 'Deduct' ? line(`${esc(fIcon(r.toFund))} ${esc(r.toFund || '')} <span class="muted small">${acctOf(r.toFund)}</span>`, '+' + amt, ' pos') : '') +
+      const toAcct = F.adjType === 'Transfer' ? r.fromAccount : r.toAccount;
+      el.innerHTML = (F.adjType !== 'Add' ? line(`${esc(fIcon(r.fromFund))} ${esc(r.fromFund || '')} <span class="muted small">${esc(r.fromAccount || '')}</span>`, '−' + amt, ' neg') : '') +
+        (F.adjType !== 'Deduct' ? line(`${esc(fIcon(r.toFund))} ${esc(r.toFund || '')} <span class="muted small">${esc(toAcct || '')}</span>`, '+' + amt, ' pos') : '') +
         `<span class="muted small">Changes ${esc(pName(r.person))}’s fund balances.</span>`;
     }
   }
@@ -3247,7 +3259,7 @@
         const diff = E.round2(Number(payload.amount) - w.balance);
         if (Math.abs(diff) < 0.005) { toast('That’s already the balance.', true); return; }
         closeModal();
-        persist('adjustments', { id: newId('adjustments'), date: payload.date, person: w.owner === 'Shared' ? state.M.viewer : w.owner, fromFund: diff < 0 ? payload.fund : '', toFund: diff > 0 ? payload.fund : '',
+        persist('adjustments', { id: newId('adjustments'), date: payload.date, person: w.owner === 'Shared' ? state.M.viewer : w.owner, fromFund: diff < 0 ? fundAt(payload.fund, w.linked) : '', toFund: diff > 0 ? fundAt(payload.fund, w.linked) : '',
           amount: Math.abs(diff), note: payload.note || 'Balance fix' }, true, '✓ Balance fixed');
         return;
       }
@@ -3278,9 +3290,11 @@
       delete payload.account;
     }
     if (F.kind === 'adjustments') {
-      if (F.adjType === 'Add') payload.fromFund = '';
-      if (F.adjType === 'Deduct') payload.toFund = '';
       if (F.adjType === 'Account' && payload.fromAccount === payload.toAccount) { toast('Choose two different accounts.', true); return; }
+      if (F.adjType === 'Transfer') payload.toAccount = payload.fromAccount;
+      if (F.adjType === 'Transfer' && payload.fromFund === payload.toFund) { toast('Choose two different funds.', true); return; }
+      payload.fromFund = F.adjType === 'Add' ? '' : fundAt(payload.fromFund, payload.fromAccount);
+      payload.toFund = F.adjType === 'Deduct' ? '' : fundAt(payload.toFund, payload.toAccount);
       delete payload.fromAccount;
       delete payload.toAccount;
     }
@@ -3322,7 +3336,7 @@
     const fee = { kind: 'expenses', remove: 'E-wt-' + t.id };
     if (from.linked || to.linked) {
       delete adjustment.remove;
-      adjustment.record = { id: 'A-wt-' + t.id, date: t.date, person: t.person, fromFund: from.linked ? t.fromFund : '', toFund: to.linked ? t.toFund : '', amount: to.linked ? x.received : x.converted, note: 'Wallet transfer: ' + route };
+      adjustment.record = { id: 'A-wt-' + t.id, date: t.date, person: t.person, fromFund: from.linked ? fundAt(t.fromFund, from.linked) : '', toFund: to.linked ? fundAt(t.toFund, to.linked) : '', amount: to.linked ? x.received : x.converted, note: 'Wallet transfer: ' + route };
     }
     if (x.fee) {
       delete fee.remove;
@@ -4153,7 +4167,7 @@
     else if (act === 'acct-transfer' || act === 'acct-open') {
       const M = state.M;
       const code = state.person !== 'All' ? state.person : (M.codes.indexOf(store.get('lastPerson')) >= 0 ? store.get('lastPerson') : M.codes[0]);
-      const first = a => fundsIn(a)[0] || '';
+      const first = a => fundAt(heldIn(a)[0] || '', a);
       if (act === 'acct-transfer') {
         const other = M.accounts.find(a => a !== key) || key;
         openForm('adjustments', { date: M.today, person: code, fromFund: first(key), toFund: first(other), amount: '', note: '' }, { isNew: true, adjType: 'Account' });
@@ -4334,7 +4348,11 @@
       const r = state.form.rec;
       const side = el.name === 'fromAccount' ? 'fromFund' : el.name === 'toAccount' ? 'toFund' : 'fund';
       if (el.name === 'account') r.fund = E.interestFundIn(el.value, state.M.funds) || fundsIn(el.value)[0] || ''; // interest: the account's one fund
-      else if (fundsIn(el.value).indexOf(r[side]) < 0) r[side] = fundsIn(el.value)[0] || '';
+      else {
+        if (heldIn(el.value).indexOf(r[side]) < 0) r[side] = heldIn(el.value)[0] || '';
+        // Between funds: both funds are in the one account.
+        if (state.form.adjType === 'Transfer' && heldIn(el.value).indexOf(r.toFund) < 0) r.toFund = heldIn(el.value).find(f => f !== r.fromFund) || '';
+      }
       // Interest on the joint account belongs to both; personal accounts to one person.
       if (el.name === 'account') r.person = /shared/i.test(el.value) ? 'Shared' : (r.person === 'Shared' ? state.M.codes[0] : r.person);
       renderForm();
