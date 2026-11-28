@@ -2181,7 +2181,7 @@
       bg = accent;
     }
     const [w, h] = widgetBox(size);
-    // .45 = PICTURE_SHADE in widget/scriptable.js: dark enough for white words, also on a Clear or Tinted Home Screen.
+    // .45 = PICTURE_SHADE in widget/scriptable.js: dark enough for white words. (A Tinted Home Screen drops the picture.)
     const bgCss = back === 'picture' ? `background:linear-gradient(rgba(0,0,0,.45),rgba(0,0,0,.45)),url('${picture}') center/cover` : `background:${bg}`;
     // Real size, or a little smaller where the card is narrower than the widget (medium on smaller iPhones).
     const box = `class="wprev ${size}${back === 'picture' ? ' pic' : ''}" style="width:min(${w}px,100%);aspect-ratio:${w}/${h};${bgCss};color:${ink}" role="img"`;
@@ -2192,21 +2192,22 @@
       const part = b.budget > 0 ? Math.min(1, Math.max(0, b.spent) / b.budget) : b.spent > 0 ? 1 : 0;
       const over = b.left < -0.004;
       const label = who === 'All' ? 'Budget' : pName(who) + '’s budget';
-      return `<div ${box} aria-label="${esc(label)}: ${esc(widgetMoney(b.left))} left">
+      const big = over ? esc(widgetMoney(-b.left, look.short)) + ' over' : esc(widgetMoney(b.left, look.short)) + ' left';
+      return `<div ${box} aria-label="${esc(label)}: ${over ? esc(widgetMoney(-b.left)) + ' over' : esc(widgetMoney(b.left)) + ' left'}">
         <div class="wp-head"><span style="color:${soft}">${esc(label)}</span><b>${esc(monthLong(m).slice(0, 3))}</b></div>
-        <div class="wp-big" style="${over ? 'color:' + bad + ';' : ''}${none ? 'font-size:19px' : ''}">${none ? 'No budget yet' : esc(widgetMoney(b.left, look.short)) + ' left'}</div>
+        <div class="wp-big" style="${over ? 'color:' + bad + ';' : ''}${none ? 'font-size:19px' : ''}">${none ? 'No budget yet' : big}</div>
         <div class="wp-bar" style="background:${track}">${part > 0 ? `<span style="width:${Math.max(8, part * 100).toFixed(1)}%;background:${over ? bad : bar}"></span>` : ''}</div>
         <div class="wp-foot" style="color:${soft}">${none ? 'Add this month’s pay' : esc(widgetMoney(b.spent, look.short)) + ' of ' + esc(widgetMoney(b.budget, look.short))}</div></div>`;
     }
     const income = Math.max(0, s.income);
     const share = v => (income > 0 ? Math.max(0, v) / income : v > 0 ? 1 : 0);
-    const cols = [['Income', '💼', s.income, income > 0 ? 1 : 0], ['Expenses', '🛒', s.spent, share(s.spent)], ['Remaining', '💵', s.left, share(s.left)]];
+    const cols = [['Income', '💼', s.income, income > 0 ? 1 : 0], ['Expenses', '🛒', s.spent, share(s.spent)], s.left < -0.004 ? ['Over', '⚠️', -s.left, 1] : ['Remaining', '💵', s.left, share(s.left)]];
     return `<div ${box} aria-label="${esc(monthLong(m))}: income ${esc(widgetMoney(s.income))}, expenses ${esc(widgetMoney(s.spent))}, remaining ${esc(widgetMoney(s.left))}">
       <div class="wp-head"><b>${esc(monthLong(m))}</b><span style="color:${soft};font-size:12px">${esc(name)}</span></div>
       <div class="wp-cols">${cols.map(([label, icon, v, part], i) => `<div class="wp-col">
         <div class="wp-ring" style="--p:${(Math.min(1, part) * 360).toFixed(1)}deg;--c:${rings[i]};--t:${track}"></div><span class="wp-icon" aria-hidden="true">${icon}</span>
         <span class="wp-label" style="color:${soft}">${label}</span>
-        <b class="wp-amt" style="${i === 2 && v < -0.004 ? 'color:' + bad : ''}">${esc(widgetMoney(v, look.short))}</b></div>`).join('')}</div></div>`;
+        <b class="wp-amt" style="${i === 2 && s.left < -0.004 ? 'color:' + bad : ''}">${esc(widgetMoney(v, look.short))}</b></div>`).join('')}</div></div>`;
   }
 
   function renderWidget(status) {

@@ -10,8 +10,10 @@
 const CODE = '__WIDGET_CODE__';
 const STORE = 'zryc-widget.json';
 const REFRESH_MINUTES = 5; // a request: iOS decides when widgets really refresh
-// How much a picture background is darkened. Enough that white words stay readable on bright photos, and on a
-// Clear or Tinted Home Screen, where iOS dims and recolours the picture but keeps the words.
+// How much a picture background is darkened, so white words stay readable on bright photos.
+// On a Tinted or Clear Home Screen iOS removes widget backgrounds (pictures too) and draws everything else in one
+// tint, keeping only how see-through each part is. So nothing here may rely on colour alone: over budget is said in
+// words, and tracks, rings and secondary words are opaque enough to still show when iOS recolours them.
 const PICTURE_SHADE = 0.45;
 
 const parts = CODE.split('|');
@@ -122,20 +124,20 @@ function palette(d, hasPicture) {
   const white = new Color('#FFFFFF');
   const accent = new Color(d.color);
   const back = d.back === 'picture' && !hasPicture ? 'dark' : d.back;
-  const onDark = { ink: white, soft: new Color('#FFFFFF', 0.72), track: new Color('#FFFFFF', 0.16), bad: new Color('#FF8A8A'),
-    rings: [new Color('#4ADE80'), new Color('#FF8A8A'), accent], ringTrack: new Color('#FFFFFF', 0.18), bar: accent };
-  const onLight = { ink: new Color('#1E2A3A'), soft: new Color('#667085'), track: new Color('#000000', 0.08), bad: new Color('#D33A3A'),
-    rings: [new Color('#16A34A'), new Color('#E5484D'), accent], ringTrack: new Color('#8E8E93', 0.22), bar: accent };
+  const onDark = { ink: white, soft: new Color('#FFFFFF', 0.78), track: new Color('#FFFFFF', 0.24), bad: new Color('#FF8A8A'),
+    rings: [new Color('#4ADE80'), new Color('#FF8A8A'), accent], ringTrack: new Color('#FFFFFF', 0.26), bar: accent };
+  const onLight = { ink: new Color('#1E2A3A'), soft: new Color('#5B6577'), track: new Color('#000000', 0.12), bad: new Color('#D33A3A'),
+    rings: [new Color('#16A34A'), new Color('#E5484D'), accent], ringTrack: new Color('#8E8E93', 0.3), bar: accent };
   if (back === 'picture') {
     const all = new Color('#FFFFFF', 0.95);
-    return Object.assign({}, onDark, { back, soft: new Color('#FFFFFF', 0.82), track: new Color('#FFFFFF', 0.3), rings: [all, all, all], ringTrack: new Color('#FFFFFF', 0.3) });
+    return Object.assign({}, onDark, { back, soft: new Color('#FFFFFF', 0.85), track: new Color('#FFFFFF', 0.34), rings: [all, all, all], ringTrack: new Color('#FFFFFF', 0.34) });
   }
   if (back === 'dark') return Object.assign({ back, bg: new Color('#1C1C1E') }, onDark);
   if (back === 'light') return Object.assign({ back, bg: white }, onLight);
   if (back === 'colour') {
     const ink = isLight(d.color) ? new Color('#1E2A3A') : white;
     const inkHex = isLight(d.color) ? '#1E2A3A' : '#FFFFFF';
-    return { back, bg: accent, ink, soft: new Color(inkHex, 0.75), track: new Color(inkHex, 0.22), bad: ink, rings: [ink, ink, ink], ringTrack: new Color(inkHex, 0.25), bar: ink };
+    return { back, bg: accent, ink, soft: new Color(inkHex, 0.8), track: new Color(inkHex, 0.28), bad: ink, rings: [ink, ink, ink], ringTrack: new Color(inkHex, 0.3), bar: ink };
   }
   // auto: follows the iPhone's light / dark appearance
   const dyn = (a, b) => Color.dynamic(a, b);
@@ -248,7 +250,9 @@ function drawWide(d, stale, family) {
   const cols = [
     ['Income', 'briefcase.fill', '💼', d.income, income > 0 ? 1 : 0, p.ink],
     ['Expenses', 'cart.fill', '🧾', d.spent, share(d.spent), p.ink],
-    ['Remaining', 'banknote.fill', '💰', d.left, share(d.left), d.left < -0.004 ? p.bad : p.ink],
+    d.left < -0.004 // over: said in words too, as a Tinted Home Screen shows no red
+      ? ['Over', 'exclamationmark.triangle.fill', '⚠️', -d.left, 1, p.bad]
+      : ['Remaining', 'banknote.fill', '💰', d.left, share(d.left), p.ink],
   ];
   const row = w.addStack();
   row.layoutHorizontally();
@@ -262,7 +266,7 @@ function drawWide(d, stale, family) {
     ringRow.addSpacer();
     const ring = ringRow.addStack();
     ring.size = new Size(side, side);
-    ring.backgroundImage = ringImage(part, p.rings[i], p.ringTrack, side, 6);
+    ring.backgroundImage = ringImage(part, p.rings[i], p.ringTrack, side, 7);
     ring.centerAlignContent();
     ring.addSpacer();
     const icon = symbol(sym, null);
@@ -276,7 +280,7 @@ function drawWide(d, stale, family) {
     ring.addSpacer();
     ringRow.addSpacer();
     col.addSpacer(6);
-    [[label, Font.mediumSystemFont(12), p.soft], [money(value, d.cur, d.short), Font.boldSystemFont(15), color]].forEach(([text, font, c], j) => {
+    [[label, Font.semiboldSystemFont(12), p.soft], [money(value, d.cur, d.short), Font.boldSystemFont(15), color]].forEach(([text, font, c], j) => {
       const line = col.addStack();
       line.addSpacer();
       addText(line, text, font, c, { shrink: j ? 0.55 : 0.8 });
@@ -295,13 +299,14 @@ function drawSmall(d, stale, family) {
   w.setPadding(16, 16, 16, 16);
   const head = w.addStack();
   head.centerAlignContent();
-  addText(head, d.who === 'All' ? 'Budget' : d.whose + ' budget', Font.mediumSystemFont(15), p.soft, { shrink: 0.7 });
+  addText(head, d.who === 'All' ? 'Budget' : d.whose + ' budget', Font.semiboldSystemFont(15), p.soft, { shrink: 0.7 });
   head.addSpacer(4);
   addText(head, stale ? d.month + ' ·' : d.month, Font.boldSystemFont(15), p.ink);
   w.addSpacer();
   const none = !(d.budget > 0) && !(d.budgetSpent > 0);
   const over = d.budgetLeft < -0.004;
-  addText(w, none ? 'No budget yet' : money(d.budgetLeft, d.cur, d.short) + ' left', Font.boldSystemFont(none ? 19 : 23), over ? p.bad : p.ink, { shrink: 0.5 });
+  const headline = none ? 'No budget yet' : over ? money(-d.budgetLeft, d.cur, d.short) + ' over' : money(d.budgetLeft, d.cur, d.short) + ' left';
+  addText(w, headline, Font.boldSystemFont(none ? 19 : 23), over ? p.bad : p.ink, { shrink: 0.5 });
   w.addSpacer(10);
   const barWidth = box.width - 32;
   const bar = w.addStack();
@@ -317,7 +322,7 @@ function drawSmall(d, stale, family) {
   }
   bar.addSpacer();
   w.addSpacer();
-  addText(w, none ? 'Add this month’s pay' : `${money(d.budgetSpent, d.cur, d.short)} of ${money(d.budget, d.cur, d.short)}`, Font.mediumSystemFont(13), p.soft, { shrink: 0.6 });
+  addText(w, none ? 'Add this month’s pay' : `${money(d.budgetSpent, d.cur, d.short)} of ${money(d.budget, d.cur, d.short)}`, Font.semiboldSystemFont(13), p.soft, { shrink: 0.6 });
   return w;
 }
 
@@ -326,12 +331,13 @@ function drawAccessory(d, family) {
   const w = new ListWidget();
   w.url = tapUrl;
   w.refreshAfterDate = new Date(Date.now() + REFRESH_MINUTES * 60000);
-  const left = money(d.budgetLeft, d.cur, true) + ' left';
+  const over = d.budgetLeft < -0.004;
+  const left = money(over ? -d.budgetLeft : d.budgetLeft, d.cur, true) + (over ? ' over' : ' left');
   if (family === 'accessoryInline') { w.addText(left); return w; }
   const t1 = w.addText(family === 'accessoryCircular' ? d.month : `${d.who === 'All' ? 'Budget' : d.whose + ' budget'} · ${d.month}`);
   t1.font = Font.mediumSystemFont(12);
   t1.lineLimit = 1;
-  const t2 = w.addText(family === 'accessoryCircular' ? money(d.budgetLeft, d.cur, true) : left);
+  const t2 = w.addText(family === 'accessoryCircular' ? money(d.budgetLeft, d.cur, true) : left); // circular keeps the − sign
   t2.font = Font.boldSystemFont(family === 'accessoryCircular' ? 12 : 17);
   t2.minimumScaleFactor = 0.5;
   t2.lineLimit = 1;
