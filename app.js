@@ -23,7 +23,7 @@
 
   // Icons used when a fund or category has none set in Settings.
   const ICON_FALLBACK = {
-    'Living Expenses': '🏠', 'Savings': '🐷', 'Tuition Fund': '🎓', 'Family': '👨‍👩‍👧', 'GPGZ': '✨', 'Shopping/Travel': '✈️', 'Emergency Fund': '🛟',
+    'Living Expenses': '🏠', 'Savings': '🐷', 'Tuition Fund': '🎓', 'Family': '👨‍👩‍👧', 'GPGZ': '✨', 'Shopping/Travel': '✈️', 'Emergency Fund': '🛟', 'Visa 485': '🛂',
     'Food/Snack': '🍜', 'Grocery': '🛒', 'Daily Essentials': '🧴', 'Transport': '🚌', 'Phone': '📱', 'Study': '📚', 'Medical': '💊', 'Other': '📦',
     'Shopping': '🛍️', 'Tuition Fee': '🎓', 'Emergency': '🩺',
   };
@@ -32,9 +32,18 @@
     'Living Expenses': ['#2A78D6', '🏠', 'Everyday Account'], 'Savings': ['#1BAF7A', '🐷', 'Self Saving'],
     'Tuition Fund': ['#EDA100', '🎓', 'Shared Saving'], 'Family': ['#E87BA4', '👨‍👩‍👧', 'Self Saving'],
     'GPGZ': ['#008300', '✨', 'Shared Saving'], 'Shopping/Travel': ['#0891B2', '✈️', 'Self Saving'], 'Emergency Fund': ['#A16207', '🛟', 'GoalSaver'],
+    'Visa 485': ['#7C3AED', '🛂', 'Visa GoalSaver'],
   };
   // Bank accounts: icon + colour (colour-blind-safe order, same as the first fund colours).
-  const ACCOUNT_STYLE = { 'Everyday Account': ['💳', '#2A78D6'], 'Self Saving': ['🏦', '#1BAF7A'], 'Shared Saving': ['🤝', '#EDA100'], 'GoalSaver': ['🛟', '#A16207'] };
+  const ACCOUNT_STYLE = { 'Everyday Account': ['💳', '#2A78D6'], 'Self Saving': ['🏦', '#1BAF7A'], 'Shared Saving': ['🤝', '#EDA100'], 'GoalSaver': ['🛟', '#A16207'], 'Visa GoalSaver': ['🛂', '#7C3AED'] };
+  /**
+   * Budget split from the next pay after the Visa 485 fund was added (Nov 2026). Earlier pay keeps its split.
+   * Each row: the fund, and a test that finds it among your funds even if it's named a bit differently.
+   */
+  const VISA_SPLIT = [
+    ['Living Expenses', 0.16, /^living/i], ['Savings', 0.15, /^savings?$/i], ['Tuition Fund', 0.13, /^tuition/i], ['GPGZ', 0.13, /^gpgz/i],
+    ['Family', 0.10, /^family/i], ['Shopping/Travel', 0.05, /^shopping/i], ['Emergency Fund', 0.05, /^emergency/i], ['Visa 485', 0.23, /^visa\s*485/i],
+  ];
   const ACCOUNT_COLOURS = ['#2A78D6', '#1BAF7A', '#EDA100', '#E87BA4', '#008300'];
   // Wallet page: [country, currency, flag, name], and quick picks [name, card colour, badge, logo in assets/logos].
   const WALLET_PLACES = [['AU', 'AUD', '🇦🇺', 'Australia'], ['MY', 'MYR', '🇲🇾', 'Malaysia']];
@@ -322,7 +331,7 @@
     const M = state.M;
     const warnings = M.warnings.length
       ? `<div class="notice"><strong>⚠️ Check your settings</strong><ul>${M.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>` : '';
-    $view.innerHTML = warnings + accountFixNotice() + goalSaverNotice() + v[3]();
+    $view.innerHTML = warnings + accountFixNotice() + goalSaverNotice() + visaNotice() + v[3]();
     const hooks = state.after;
     state.after = [];
     hooks.forEach(fn => fn());
@@ -349,6 +358,23 @@
     return `<section class="card" style="border:2px solid var(--brand-deep)"><div class="row" style="flex-wrap:nowrap;align-items:flex-start">${tile('🛟', '#A16207')}
       <div style="flex:1"><strong>Emergency Fund → GoalSaver</strong><div class="muted small">From 25 Nov 2026, the Emergency part of each pay goes to 🛟 GoalSaver. Emergency money saved before then stays in ${esc(f.account)}. Other funds don’t change.</div>
       <button class="btn primary" data-act="goal-saver" style="margin-top:10px">Use GoalSaver</button></div></div></section>`;
+  }
+
+  /** The Visa 485 fund (its own Visa GoalSaver account) and the new budget split: shown until both are set. */
+  const visaFund = () => state.M.funds.find(f => /^visa\s*485/i.test(f.name));
+  const visaSplitSet = () => { const f = visaFund(); return !!f && state.M.allocations.some(a => (a.pct[f.name] || 0) > 0); };
+  /** The day the new split starts: the day after the last pay you recorded, and not before today, so pay already in keeps its split. */
+  function visaSplitFrom() {
+    const last = (state.app.data.income || []).map(r => r.date).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().pop();
+    const today = E.todayISO();
+    return last && E.addDays(last, 1) > today ? E.addDays(last, 1) : today;
+  }
+  function visaNotice() {
+    if (needsAccountFix() || visaSplitSet() || ['dashboard', 'accounts', 'balances', 'me'].indexOf(state.view) < 0) return '';
+    const list = VISA_SPLIT.map(x => esc(x[0]) + ' ' + Math.round(x[1] * 100) + '%').join(' · ');
+    return `<section class="card" style="border:2px solid var(--brand-deep)"><div class="row" style="flex-wrap:nowrap;align-items:flex-start">${tile('🛂', '#7C3AED')}
+      <div style="flex:1"><strong>New fund: Visa 485 → 🛂 Visa GoalSaver</strong><div class="muted small">${visaFund() ? '' : 'Adds the Visa 485 fund in its own new GoalSaver account. '}Starting with your next pay (dated ${esc(fmtDate(visaSplitFrom()))} or later), each pay is split: ${list}. Pay already recorded keeps its old split.</div>
+      <button class="btn primary" data-act="visa-485" style="margin-top:10px">Add Visa 485 &amp; new split</button></div></div></section>`;
   }
 
   function monthNav() {
@@ -3643,6 +3669,38 @@
     return null;
   }
 
+  /** Adds the Visa 485 fund (in the Visa GoalSaver account) if it isn't there, then a new budget split from the next pay. */
+  async function addVisaFund(button) {
+    const S = state.app.data.settings;
+    const rec = RECOMMENDED_FUNDS['Visa 485'];
+    if (button) button.disabled = true;
+    try {
+      if (!visaFund()) {
+        const funds = S.funds.concat([{ name: 'Visa 485', account: rec[2], colour: rec[0], icon: rec[1] }]);
+        await serverUpdate('saveSettings', [{ funds }], '✓ Visa 485 fund added');
+      }
+      const names = state.M.fundNames;
+      const pct = {};
+      names.forEach(f => { pct[f] = 0; });
+      const missing = [];
+      VISA_SPLIT.forEach(([label, share, test]) => {
+        const f = names.find(n => test.test(n));
+        if (f) pct[f] = share; else missing.push(label);
+      });
+      if (missing.length) throw new Error('Couldn’t find fund ' + missing.join(', ') + '. Set the split in Settings → Allocation.');
+      const from = visaSplitFrom();
+      const rows = (state.app.data.settings.allocations || []).filter(a => a.from !== from).map(a => {
+        const p = {};
+        names.forEach(f => { p[f] = (a.pct && a.pct[f]) || 0; });
+        return { from: a.from, pct: p };
+      }).concat([{ from, pct }]).sort((a, b) => (a.from < b.from ? -1 : 1));
+      await serverUpdate('saveSettings', [{ allocations: rows }], '✓ New split from ' + fmtDate(from) + ': Visa 485 23%');
+    } catch (err) {
+      if (button) button.disabled = false;
+      toast(errText(err), true);
+    }
+  }
+
   /** Fills the Funds grid with the recommended colours and icons (saved when you press Save funds). */
   function applyRecommendedColours() {
     document.querySelectorAll('#g-funds tbody tr').forEach(tr => {
@@ -4365,6 +4423,8 @@
       hideMoney = !hideMoney;
       store.set('hideMoney', hideMoney ? '1' : '0');
       renderKeepingPlace();
+    } else if (act === 'visa-485') {
+      addVisaFund(el);
     } else if (act === 'goal-saver') {
       const rows = state.app.data.settings.funds.map(f => (String(f.name).trim() === 'Emergency Fund' ? Object.assign({}, f, { account: 'GoalSaver' }) : f));
       saveSettings({ funds: rows }, el, '✓ Emergency Fund now goes to GoalSaver');
