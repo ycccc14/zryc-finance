@@ -518,14 +518,16 @@
   .acct-total strong { font-size: 20px; font-weight: 800; letter-spacing: -.01em; color: var(--ink); }
   .acct-total strong.neg { color: var(--bad); }
   .acct-row { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 6px; }
+  .acct-row[style*="--n:5"] { gap: 4px; }
+  .acct-row[style*="--n:5"] .acct-chip { padding: 8px 2px; }
   .acct-chip { background: var(--soft); border-radius: 12px; padding: 8px 6px; min-width: 0; display: grid; gap: 2px; text-align: center; container-type: inline-size; }
   .hero .acct-row { margin-top: 18px; }
   .hero .acct-chip { background: rgba(255, 255, 255, .45); }
   @media (prefers-color-scheme: dark) { .hero .acct-chip { background: rgba(255, 255, 255, .08); } }
-  .acct-chip .k { font-size: clamp(10px, 15cqi, 12px); font-weight: 650; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .acct-chip .k { font-size: clamp(9px, 17cqi, 12px); font-weight: 650; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .hero .acct-chip .k { color: inherit; opacity: .8; }
   .acct-chip .i { font-size: 18px; line-height: 1.2; }
-  .acct-chip .v { font-size: clamp(10px, 15cqi, 15px); font-weight: 800; white-space: nowrap; letter-spacing: -.01em; }
+  .acct-chip .v { font-size: clamp(9px, 16cqi, 15px); font-weight: 800; white-space: nowrap; letter-spacing: -.01em; }
   .list-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 4px 2px -6px; }
   .list-head h2 { display: flex; align-items: center; gap: 6px; }
   /* Home "September activity" + All/ZR/YC/Shared stay on one row: the title gives way first. */
@@ -796,8 +798,8 @@
   <div id="lock" class="lock" hidden></div>
   <div id="pair" hidden></div>
   <script src="vendor/chart.umd.js"></script>
-  <script src="engine.js?v=291e1bbd37"></script>
-  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = '291e1bbd37';</script>
-  <script src="boot.js?v=291e1bbd37"></script>
+  <script src="engine.js?v=db36f92b1e"></script>
+  <script>window.__API__ = 'https://script.google.com/macros/s/AKfycbwCJHHo-c-g1w1cmaxhtk2mJoHPa9-KMviPK4LY1PrmuAXcLhm5J0kNenylmUy0bi5TTg/exec'; window.__BUILD__ = 'db36f92b1e';</script>
+  <script src="boot.js?v=db36f92b1e"></script>
 </body>
 </html>

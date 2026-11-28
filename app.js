@@ -224,11 +224,17 @@
   const aIcon = name => (ACCOUNT_STYLE[name] || ['🏦'])[0];
   const aColour = name => (ACCOUNT_STYLE[name] || [])[1] || ACCOUNT_COLOURS[Math.max(0, state.M.accounts.indexOf(name)) % ACCOUNT_COLOURS.length];
   /** Short account name for small tiles: Everyday Account → Everyday, Self Saving → Self, GoalSaver → Goal. */
-  const aShort = name => String(name).replace(/\s*(account|savings?)$/i, '').replace(/(.)saver$/i, '$1') || String(name);
-  /** Accounts side by side (up to 4 in a row): icon and short name, then the balance. */
-  const acctRow = (names, balOf) => `<div class="acct-row" style="--n:${Math.min(4, names.length) || 1}">${names.map(a => {
+  const aShort = name => (name === 'Visa GoalSaver' ? 'Visa' : String(name)).replace(/\s*(account|savings?)$/i, '').replace(/(.)saver$/i, '$1') || String(name);
+  /** A balance short enough for 5 tiles in a row on a phone: $845.20, $3,412, $12.3k (the exact amount is in the tile's title). */
+  const chipMoney = n => {
+    const x = Math.abs(n || 0);
+    if (masked() || x < 1000) return money(n);
+    return (n < -0.004 ? '−' : '') + '$' + (x < 10000 ? Math.round(x).toLocaleString('en-AU') : (x / 1000).toFixed(x < 100000 ? 1 : 0) + 'k');
+  };
+  /** Accounts side by side (up to 5 in a row): icon and short name, then the balance. */
+  const acctRow = (names, balOf) => `<div class="acct-row" style="--n:${Math.min(5, names.length) || 1}">${names.map(a => {
     const bal = balOf(a);
-    return `<div class="acct-chip" title="${esc(a)}"><span class="i" aria-hidden="true">${esc(aIcon(a))}</span><span class="k">${esc(aShort(a))}</span><span class="v${neg(bal)}">${money(bal)}</span></div>`;
+    return `<div class="acct-chip" title="${esc(a)}${masked() ? '' : ' · ' + esc(money(bal))}"><span class="i" aria-hidden="true">${esc(aIcon(a))}</span><span class="k">${esc(aShort(a))}</span><span class="v${neg(bal)}">${chipMoney(bal)}</span></div>`;
   }).join('')}</div>`;
   /** The funds mapped to an account: where each pay's share goes. */
   const fundsIn = account => state.M.fundNames.filter(f => fundOf(f).account === account);
@@ -913,9 +919,9 @@
     const amt = (r, a) => sumOf(fundsIn(a), f => r.alloc[f]);
     const rows = pending.slice().reverse().map(r => `<div class="insight" style="align-items:flex-start">${avatar(r.person, 'lg')}<div style="flex:1;min-width:0">
       <strong>${esc(pName(r.person))}’s pay · ${dayLabel(r.date)}</strong> <span class="muted small">net ${money(r.net)}</span>
-      <div class="row" style="margin-top:6px">${targets.map(a => `<span class="chip" style="padding-left:10px">${esc(aIcon(a))} ${esc(a)} <strong>${money(amt(r, a))}</strong></span>`).join('')}</div>
+      <div class="row" style="margin-top:6px">${targets.filter(a => Math.abs(amt(r, a)) > 0.004).map(a => `<span class="chip" style="padding-left:10px">${esc(aIcon(a))} ${esc(a)} <strong>${money(amt(r, a))}</strong></span>`).join('')}</div>
       <button class="btn" data-act="xfer-done" data-key="${esc(r.id)}" style="margin-top:8px">✅ Done</button></div></div>`).join('');
-    const totals = pending.length > 1 ? `<div class="receipt" style="margin-bottom:6px"><strong>Total to move</strong>${targets.map(a =>
+    const totals = pending.length > 1 ? `<div class="receipt" style="margin-bottom:6px"><strong>Total to move</strong>${targets.filter(a => Math.abs(sumOf(pending, r => amt(r, a))) > 0.004).map(a =>
       `<div class="line"><span>${esc(aIcon(a))} ${esc(a)}</span><strong>${money(sumOf(pending, r => amt(r, a)))}</strong></div>`).join('')}
       <button class="btn primary" data-act="xfer-done" data-key="${pending.map(r => esc(r.id)).join(',')}">✅ All done</button></div>` : '';
     return `<section class="card"><div class="card-head"><h2>💸 Move to savings</h2><span class="hint">from ${esc(living ? living.account : 'your pay account')}</span></div>${totals}${rows}</section>`;
